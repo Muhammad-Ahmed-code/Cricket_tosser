@@ -1,0 +1,16 @@
+{
+  "name": "pitchreader",
+  "version": "1.0.0",
+  "description": "- **test-pitch.js** — Standalone script that reads `pitch.jpg`, converts it to base64, and sends it to Claude with a pitch-reading system prompt. Returns a JSON report with toss decision, par score, and pitch behaviour. Good for testing the vision pipeline in isolation. - **weather.js** — Fetches live weather from the Open-Meteo API (no API key required) for a given lat/lng. Returns a clean summary object: temperature, humidity, wind speed, total rainfall over the past 48 hours, and a derived conditions string (dry / damp / wet). - **analyse.js** — The combined pipeline. Fetches live weather, reads the pitch image, and sends both to Claude in a single message. Claude reasons about how the weather modifies what it sees in the pitch. Outputs a full captain's report as JSON.",
+  "main": "analyse.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "canvas": "^3.2.3"
+  }
+}
