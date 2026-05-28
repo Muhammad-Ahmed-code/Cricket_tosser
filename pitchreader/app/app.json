@@ -8,9 +8,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "cover",
-      "backgroundColor": "#f5f0e8"
+      "backgroundColor": "#07030A"
     },
     "ios": {
       "supportsTablet": false,
@@ -19,7 +17,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#f5f0e8"
+        "backgroundColor": "#07030A"
       },
       "package": "com.crickettosser.app",
       "edgeToEdgeEnabled": true,
@@ -37,6 +35,12 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#07030A"
+        }
+      ],
       [
         "expo-location",
         {

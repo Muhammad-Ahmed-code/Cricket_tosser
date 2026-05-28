@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { NavigationContainer } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
@@ -9,6 +9,7 @@ import AnalysingScreen from './src/screens/AnalysingScreen'
 import ReportScreen from './src/screens/ReportScreen'
 import GroundSearchScreen from './src/screens/GroundSearchScreen'
 import PhotoPickerScreen from './src/screens/PhotoPickerScreen'
+import SplashScreenView from './src/screens/SplashScreenView'
 
 SplashScreen.preventAutoHideAsync()
 
@@ -25,33 +26,29 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>()
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true)
+
   useEffect(() => {
-    async function prepare() {
-      try {
-        // Give the app 1.5 seconds to initialise everything
-        // Location, fonts, stores all have time to boot
-        await new Promise(resolve => setTimeout(resolve, 1500))
-      } catch (e) {
-        console.warn(e)
-      } finally {
-        await SplashScreen.hideAsync()
-      }
-    }
-    prepare()
+    // Dismiss the native splash immediately — our SplashScreenView takes over
+    SplashScreen.hideAsync()
   }, [])
 
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Home" component={HomeScreen} />
-          <Stack.Screen name="Camera" component={CameraScreen} />
-          <Stack.Screen name="PhotoPicker" component={PhotoPickerScreen} />
-          <Stack.Screen name="GroundSearch" component={GroundSearchScreen} />
-          <Stack.Screen name="Analysing" component={AnalysingScreen} />
-          <Stack.Screen name="Report" component={ReportScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
+      {showSplash ? (
+        <SplashScreenView onFinish={() => setShowSplash(false)} />
+      ) : (
+        <NavigationContainer>
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Home" component={HomeScreen} />
+            <Stack.Screen name="Camera" component={CameraScreen} />
+            <Stack.Screen name="PhotoPicker" component={PhotoPickerScreen} />
+            <Stack.Screen name="GroundSearch" component={GroundSearchScreen} />
+            <Stack.Screen name="Analysing" component={AnalysingScreen} />
+            <Stack.Screen name="Report" component={ReportScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      )}
     </SafeAreaProvider>
   )
 }

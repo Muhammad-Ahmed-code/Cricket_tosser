@@ -7,20 +7,30 @@ export type GroundLocation = {
 }
 
 export async function getCurrentLocation(): Promise<{ lat: number; lng: number }> {
-  const { status } = await Location.requestForegroundPermissionsAsync()
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync()
+    console.log('[location] permission status:', status)
 
-  if (status !== 'granted') {
-    // Fall back to centre of England if denied
+    if (status !== 'granted') {
+      console.log('[location] permission denied, falling back to England centre')
+      return { lat: 52.3555, lng: -1.1743 }
+    }
+
+    const location = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Location timed out')), 15000)
+      ),
+    ])
+
+    console.log('[location] coords:', location.coords.latitude, location.coords.longitude)
+    return {
+      lat: location.coords.latitude,
+      lng: location.coords.longitude,
+    }
+  } catch (err) {
+    console.log('[location] error:', err)
     return { lat: 52.3555, lng: -1.1743 }
-  }
-
-  const location = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.Balanced,
-  })
-
-  return {
-    lat: location.coords.latitude,
-    lng: location.coords.longitude,
   }
 }
 
