@@ -28,7 +28,7 @@ serve(async (req) => {
 
   try {
     // --- Step 1: Parse request body ---
-    let body: { imageBase64Array: string[]; lat: number; lng: number; groundName: string; overs: number; squad?: Squad | null };
+    let body: { imageBase64Array: string[]; lat: number; lng: number; groundName: string; overs: number; squad?: Squad | null; userId?: string | null };
     try {
       body = await req.json();
     } catch (e) {
@@ -38,8 +38,8 @@ serve(async (req) => {
       });
     }
 
-    const { imageBase64Array, lat, lng, groundName, overs, squad } = body;
-    console.log(`[${requestId}] Body parsed — images: ${imageBase64Array?.length}, ground: ${groundName}, overs: ${overs}, lat: ${lat}, lng: ${lng}`);
+    const { imageBase64Array, lat, lng, groundName, overs, squad, userId } = body;
+    console.log(`[${requestId}] Body parsed — images: ${imageBase64Array?.length}, ground: ${groundName}, overs: ${overs}, lat: ${lat}, lng: ${lng}, userId: ${userId ?? 'anonymous'}`);
 
     if (!imageBase64Array?.length) {
       console.error(`[${requestId}] FAIL no images provided`);
@@ -239,6 +239,7 @@ Return ONLY a JSON object:
 
     // --- Step 6: Save to Supabase ---
     console.log(`[${requestId}] Saving report to Supabase`);
+    let reportId: string | null = null;
     try {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
       const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -248,17 +249,23 @@ Return ONLY a JSON object:
           "apikey": supabaseKey,
           "Authorization": `Bearer ${supabaseKey}`,
           "Content-Type": "application/json",
+          "Prefer": "return=representation",
         },
         body: JSON.stringify({
           ground_name: groundName,
           weather,
           prediction,
           overs,
+          user_id: userId ?? null,
           match_date: new Date().toISOString().split("T")[0],
         }),
       });
       console.log(`[${requestId}] Supabase save HTTP: ${dbRes.status}`);
-      if (!dbRes.ok) {
+      if (dbRes.ok) {
+        const rows = await dbRes.json();
+        reportId = rows[0]?.id ?? null;
+        console.log(`[${requestId}] Supabase saved, reportId: ${reportId}`);
+      } else {
         const detail = await dbRes.text();
         console.error(`[${requestId}] Supabase save failed:`, detail);
       }
@@ -269,7 +276,7 @@ Return ONLY a JSON object:
 
     console.log(`[${requestId}] Success — returning response`);
     return new Response(
-      JSON.stringify({ prediction, weather }),
+      JSON.stringify({ prediction, weather, reportId }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 

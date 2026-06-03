@@ -3,6 +3,7 @@
     "name": "Cricket Tosser",
     "slug": "cricket-tosser",
     "version": "1.0.0",
+    "scheme": "cricket-tosser",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -62,7 +63,9 @@
         {
           "cameraPermission": "Cricket Tosser needs camera access to photograph the pitch."
         }
-      ]
+      ],
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {

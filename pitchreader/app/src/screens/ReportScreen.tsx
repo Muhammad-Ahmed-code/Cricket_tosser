@@ -9,6 +9,7 @@ import {
   Share,
   Alert,
 } from 'react-native'
+import { useAuth } from '@clerk/clerk-expo'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '../../App'
 import { theme } from '../theme'
@@ -18,7 +19,8 @@ import NavLogo from '../components/NavLogo'
 type Props = NativeStackScreenProps<RootStackParamList, 'Report'>
 
 export default function ReportScreen({ route, navigation }: Props) {
-  const { result, groundName, overs, squad } = route.params
+  const { result, groundName, overs, squad, reportId } = route.params
+  const { isSignedIn } = useAuth()
   const prediction = result?.prediction ?? {}
   const weather = result?.weather ?? {}
 
@@ -71,8 +73,23 @@ export default function ReportScreen({ route, navigation }: Props) {
     })
   }
 
-  const handleFeedback = () => {
-    Alert.alert('Coming soon', 'Post-match feedback will be added in the next update')
+  const handleAddMatchResult = () => {
+    if (!isSignedIn) {
+      Alert.alert(
+        'Sign in to save match results',
+        'Create a free account to track your match history.',
+        [
+          { text: 'Maybe later', style: 'cancel' },
+          { text: 'Sign in', onPress: () => navigation.navigate('Auth') },
+        ]
+      )
+      return
+    }
+    if (!reportId) {
+      Alert.alert('Unavailable', 'Report ID not available for this session.')
+      return
+    }
+    navigation.navigate('Review', { reportId, groundName })
   }
 
   const [modal, setModal] = useState<{
@@ -325,9 +342,9 @@ export default function ReportScreen({ route, navigation }: Props) {
           </View>
         )}
 
-        {/* Feedback button */}
-        <TouchableOpacity style={styles.feedbackBtn} onPress={handleFeedback} activeOpacity={0.8}>
-          <Text style={styles.feedbackBtnText}>After the match — how did it play? →</Text>
+        {/* Add match result */}
+        <TouchableOpacity style={styles.feedbackBtn} onPress={handleAddMatchResult} activeOpacity={0.8}>
+          <Text style={styles.feedbackBtnText}>📋 Add match result</Text>
         </TouchableOpacity>
 
       </ScrollView>

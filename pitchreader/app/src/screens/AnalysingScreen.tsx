@@ -24,6 +24,9 @@ import { LinearGradient } from 'expo-linear-gradient'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '../../App'
 import { analysePitch } from '../lib/api'
+import { usageStore } from '../lib/usageStore'
+import { reportHistoryStore } from '../lib/reportHistoryStore'
+import { useAuth } from '@clerk/clerk-expo'
 
 const { width: SW } = Dimensions.get('window')
 
@@ -61,6 +64,7 @@ const STEPS = [
 
 export default function AnalysingScreen({ route, navigation }: Props) {
   const { photos, groundName, overs, lat, lng, squad } = route.params
+  const { userId } = useAuth()
 
   const [stepStates, setStepStates] = useState<StepState[]>([
     'active', 'waiting', 'waiting', 'waiting', 'waiting', 'waiting',
@@ -85,6 +89,12 @@ export default function AnalysingScreen({ route, navigation }: Props) {
   const stepNum     = String(currentStep).padStart(2, '0')
 
   useEffect(() => {
+    // Paywall gate — checked synchronously against in-memory store before any work starts
+    if (!usageStore.getIsSubscribed() && usageStore.getReportCount() >= 3) {
+      navigation.replace('Paywall')
+      return
+    }
+
     // Ball spins 360° every 7 seconds — native driver (transform on Animated.View)
     Animated.loop(
       Animated.timing(ballAnim, { toValue: 1, duration: 7000, useNativeDriver: true })
@@ -126,7 +136,8 @@ export default function AnalysingScreen({ route, navigation }: Props) {
 
     ;(async () => {
       try {
-        const result = await analysePitch({ imageBase64Array: photos, lat, lng, groundName, overs, squad })
+        console.log('[AnalysingScreen] userId:', userId ?? 'anonymous')
+        const result = await analysePitch({ imageBase64Array: photos, lat, lng, groundName, overs, squad, userId: userId ?? null })
 
         clearInterval(pctInterval)
         setWeatherPct(100)
@@ -159,7 +170,22 @@ export default function AnalysingScreen({ route, navigation }: Props) {
         setStepStates(['done', 'done', 'done', 'done', 'done', 'active'])
         Animated.timing(progressAnim, { toValue: 1, duration: 700, useNativeDriver: false }).start()
 
-        setTimeout(() => navigation.navigate('Report', { result, groundName, overs, squad }), 900)
+        await usageStore.incrementReportCount()
+
+        const reportId: string | undefined = result?.reportId ?? undefined
+
+        // Save to local history so it always shows in match history
+        reportHistoryStore.save({
+          id: reportId ?? `local_${Date.now()}`,
+          ground_name: groundName,
+          overs,
+          match_date: new Date().toISOString().split('T')[0],
+          created_at: new Date().toISOString(),
+          prediction: result?.prediction ?? {},
+          weather: result?.weather ?? {},
+        }).catch(() => {})
+
+        setTimeout(() => navigation.navigate('Report', { result, groundName, overs, squad, reportId }), 900)
       } catch (err) {
         clearInterval(pctInterval)
         setError(err instanceof Error ? err.message : 'Something went wrong')

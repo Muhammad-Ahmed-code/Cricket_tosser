@@ -15,6 +15,7 @@ import { photoStore } from '../lib/photoStore'
 import { getCurrentLocation, getLocationName } from '../lib/location'
 import { groundStore } from '../lib/groundStore'
 import { squadStore } from '../lib/squadStore'
+import { usageStore } from '../lib/usageStore'
 import SquadInput from '../components/SquadInput'
 
 // Palette extracted from Home.html
@@ -46,6 +47,8 @@ const PRESET_FORMATS = [
 export default function HomeScreen({ navigation }: Props) {
   const [photos, setPhotos] = useState<(string | null)[]>(photoStore.getPhotos())
   const [ground, setGround] = useState(groundStore.getGround())
+  const [reportCount, setReportCount] = useState(usageStore.getReportCount())
+  const [isSubscribed, setIsSubscribed] = useState(usageStore.getIsSubscribed())
   const [overs, setOvers] = useState(40)
   const [selectedFormat, setSelectedFormat] = useState<'20' | '40' | '50' | 'custom'>('40')
   const [customOversText, setCustomOversText] = useState('')
@@ -75,6 +78,14 @@ export default function HomeScreen({ navigation }: Props) {
   useEffect(() => {
     const unsubscribe = groundStore.subscribe(() => {
       setGround({ ...groundStore.getGround() })
+    })
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = usageStore.subscribe(() => {
+      setReportCount(usageStore.getReportCount())
+      setIsSubscribed(usageStore.getIsSubscribed())
     })
     return unsubscribe
   }, [])
@@ -120,9 +131,23 @@ export default function HomeScreen({ navigation }: Props) {
       {/* ── Header bar ── */}
       <View style={styles.headerBar}>
         <Text style={styles.headerTitle}>CRICKET TOSSER · V0.9</Text>
-        <View style={styles.readyBadge}>
-          <View style={styles.readyDot} />
-          <Text style={styles.readyText}>READY</Text>
+        <View style={styles.headerRight}>
+          {isSubscribed ? (
+            <View style={styles.proBadge}>
+              <Text style={styles.proText}>PRO ✓</Text>
+            </View>
+          ) : (
+            <Text style={styles.freeCountText}>
+              {Math.max(0, 3 - reportCount)} of 3 free
+            </Text>
+          )}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('History')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.historyBtn}
+          >
+            <Text style={styles.historyIcon}>⏱</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -338,28 +363,41 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  historyBtn: {
+    padding: 2,
+  },
+  historyIcon: {
+    fontSize: 18,
+    lineHeight: 22,
+  },
   headerTitle: {
     fontSize: 10,
     fontWeight: '600',
     letterSpacing: 2.2,
     color: C.tan,
   },
-  readyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
+  proBadge: {
+    backgroundColor: C.gpsGreen,
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
-  readyDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: C.red,
-  },
-  readyText: {
-    fontSize: 10,
+  proText: {
+    fontSize: 9,
     fontWeight: '700',
-    letterSpacing: 1.8,
-    color: C.red,
+    letterSpacing: 1.5,
+    color: C.gpsGreenText,
+  },
+  freeCountText: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+    color: C.mutedText,
   },
 
   // ── Hero ────────────────────────────────────

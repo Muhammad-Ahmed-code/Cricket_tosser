@@ -5,6 +5,7 @@ export async function analysePitch(params: {
   groundName: string
   overs: number
   squad?: { seamers: number; fastAllRounders: number; spinners: number; spinAllRounders: number; batters: number } | null
+  userId?: string | null
 }) {
   const res = await fetch(process.env.EXPO_PUBLIC_FUNCTION_URL!, {
     method: 'POST',
