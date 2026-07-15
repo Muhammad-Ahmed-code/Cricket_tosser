@@ -6,7 +6,7 @@ const API_KEYS = {
   android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY!,
 }
 
-const ENTITLEMENT_ID = 'premium'
+const ENTITLEMENT_ID = 'pro'
 const YEARLY_PRODUCT_ID = 'pitchreader_yearly_399'
 
 export function configurePurchases(): void {
@@ -60,8 +60,11 @@ export async function loginToPurchases(userId: string): Promise<void> {
 
 export async function logoutFromPurchases(): Promise<void> {
   try {
-    await Purchases.logOut()
+    const anonymous = await Purchases.isAnonymous()
+    if (!anonymous) {
+      await Purchases.logOut()
+    }
   } catch {
-    // non-fatal — logOut on an already-anonymous session may error; safe to swallow
+    // non-fatal
   }
 }
