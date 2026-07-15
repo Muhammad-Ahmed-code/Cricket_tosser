@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import {
   View, Text, TouchableOpacity, FlatList, Image,
-  StyleSheet, Dimensions, Alert, ActivityIndicator, Platform
+  StyleSheet, Dimensions, Alert, ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import * as MediaLibrary from 'expo-media-library'
@@ -11,7 +11,6 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack'
 import { RootStackParamList } from '../../App'
 import { photoStore } from '../lib/photoStore'
 import { compressImage } from '../lib/compressImage'
-import AndroidPhotoPicker from './AndroidPhotoPicker'
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PhotoPicker'>
 
@@ -275,24 +274,16 @@ function IOSPhotoPicker({ navigation, route }: Props) {
 }
 
 // ---------------------------------------------------------------------------
-// Entry point — splits by platform
+// Entry point
 // ---------------------------------------------------------------------------
 export default function PhotoPickerScreen({ navigation, route }: Props) {
-  if (Platform.OS === 'android') {
-    return (
-      <AndroidPhotoPicker
-        slotIndex={route.params.slotIndex}
-        navigation={navigation}
-      />
-    )
-  }
   return <IOSPhotoPicker navigation={navigation} route={route} />
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a3a1a' },
+  container: { flex: 1, backgroundColor: '#104020' },
   nav: {
-    backgroundColor: '#1a3a1a',
+    backgroundColor: '#104020',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -300,9 +291,9 @@ const styles = StyleSheet.create({
   },
   navCenter: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
   navTitle: { color: '#fff', fontSize: 15, fontWeight: '500' },
-  navSub: { color: '#7ec87e', fontSize: 10, textAlign: 'center', marginTop: 2 },
+  navSub: { color: 'rgba(247,242,232,0.70)', fontSize: 10, textAlign: 'center', marginTop: 2 },
   back: { color: '#fff', fontSize: 22 },
-  takePhoto: { color: '#7ec87e', fontSize: 13, fontWeight: '500' },
+  takePhoto: { color: 'rgba(247,242,232,0.70)', fontSize: 13, fontWeight: '500' },
   usedOverlay: {
     backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'flex-end',
@@ -310,7 +301,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   slotBadge: {
-    backgroundColor: '#2d5a27',
+    backgroundColor: '#507020',
     borderRadius: 10,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -318,13 +309,13 @@ const styles = StyleSheet.create({
   slotBadgeText: { color: '#fff', fontSize: 9, fontWeight: '500' },
   currentOverlay: {
     borderWidth: 2,
-    borderColor: '#87CEEB',
+    borderColor: '#D8D4C5',
   },
   currentBadge: {
     position: 'absolute',
     top: 4,
     right: 4,
-    backgroundColor: '#87CEEB',
+    backgroundColor: '#D8D4C5',
     borderRadius: 10,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -336,9 +327,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   denied: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  deniedText: { color: '#f5f0e8', fontSize: 16, textAlign: 'center', marginBottom: 20 },
+  deniedText: { color: '#FFFDF7', fontSize: 16, textAlign: 'center', marginBottom: 20 },
   backBtn: {
-    backgroundColor: '#2d5a27',
+    backgroundColor: '#507020',
     borderRadius: 10,
     padding: 14,
     paddingHorizontal: 32,
@@ -349,5 +340,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#111',
   },
-  loadMoreText: { color: '#7ec87e', fontSize: 13 },
+  loadMoreText: { color: 'rgba(247,242,232,0.70)', fontSize: 13 },
 })

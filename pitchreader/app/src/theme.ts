@@ -1,20 +1,40 @@
 export const theme = {
-  green: {
-    dark: '#1a3a1a',
-    mid: '#2d5a27',
-    light: '#7ec87e',
-  },
-  sky: '#87CEEB',
-  skyDark: '#185FA5',
-  soil: '#f5f0e8',
-  soilDark: '#6b5a3e',
-  soilBorder: '#d4c9b0',
-  brown: '#8B5A2B',
-  white: '#ffffff',
-  text: {
-    dark: '#1a3a1a',
-    mid: '#3d2e1a',
-    muted: '#9a8a70',
-    label: '#6b5a3e',
-  }
+  // Brand greens
+  forest:     '#104020',
+  pitch:      '#507020',
+  leaf:       '#607030',
+  olive:      '#708040',
+
+  // Surfaces
+  cream:      '#F7F2E8',
+  paper:      '#FFFDF7',
+  line:       '#D8D4C5',
+
+  // Accent
+  ball:       '#903020',
+  ballDark:   '#802020',
+
+  // Text
+  brown:      '#5B3A22',
+  textPrimary:  '#14351F',
+  textSecondary: '#52624A',
+  textInverse:  '#FFFDF7',
+
+  // Spacing (8px grid)
+  space1: 4,
+  space2: 8,
+  space3: 12,
+  space4: 16,
+  space5: 20,
+  space6: 24,
+  space8: 32,
+  space10: 40,
+  space12: 48,
+
+  // Radius
+  radiusSm: 8,
+  radiusMd: 14,
+  radiusLg: 20,
+  radiusXl: 28,
+  radiusPill: 999,
 }

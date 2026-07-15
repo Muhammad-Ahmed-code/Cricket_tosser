@@ -4,214 +4,308 @@ import {
   Text,
   Animated,
   Easing,
+  Platform,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   Dimensions,
-  Image,
 } from 'react-native'
-import Svg, {
-  Defs,
-  LinearGradient as SvgLinearGradient,
-  RadialGradient as SvgRadialGradient,
-  Stop,
-  Circle,
-  Line,
-  G,
-  Path,
-} from 'react-native-svg'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import Svg, { G, Line, Circle, Path } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '../../App'
+import * as ExpoCrypto from 'expo-crypto'
 import { analysePitch } from '../lib/api'
 import { usageStore } from '../lib/usageStore'
 import { reportHistoryStore } from '../lib/reportHistoryStore'
+import { weatherCache } from '../lib/weatherCache'
+import { scheduleReminderNotification } from '../lib/notificationService'
 import { useAuth } from '@clerk/clerk-expo'
+import { track } from '../lib/analytics'
+import {
+  useFonts,
+  BricolageGrotesque_400Regular,
+  BricolageGrotesque_700Bold,
+} from '@expo-google-fonts/bricolage-grotesque'
+import {
+  JetBrainsMono_400Regular,
+  JetBrainsMono_700Bold,
+} from '@expo-google-fonts/jetbrains-mono'
 
 const { width: SW } = Dimensions.get('window')
 
-const C = {
-  cream:     '#F1EAD8',
-  dark:      '#1A0E0C',
-  red:       '#A8331F',
-  tan:       '#C2A172',
-  mutedText: 'rgba(26,14,12,0.55)',
-  dimText:   'rgba(26,14,12,0.35)',
-  veryMuted: 'rgba(26,14,12,0.18)',
-  divider:   'rgba(26,14,12,0.08)',
-  gridLine:  'rgba(26,14,12,0.05)',
+// Design tokens — cream / ink / oxblood palette
+const A = {
+  bg:       '#f1ead8',
+  spot:     '#fff5dd',
+  ink:      '#1a0e0c',
+  inkSoft:  'rgba(26,14,12,0.62)',
+  inkLow:   'rgba(26,14,12,0.42)',
+  inkFaint: 'rgba(26,14,12,0.16)',
+  inkHair:  'rgba(26,14,12,0.09)',
+  oxblood:  '#a8331f',
+  ok:       '#1f6b3a',
 }
 
-// Animated version of react-native-svg G element for the sweep arm
-const AnimatedG = Animated.createAnimatedComponent(G)
+const COIN_EMBLEM = require('../../assets/coin-emblem.png')
+const COIN_TAILS  = require('../../assets/coin-tails.png')
+
+// Android: opacity interpolations for rotateY spinner — replicates backfaceVisibility.
+// Heads faces viewer when coinRotY ∈ [0,90) ∪ (270,360]; tails the inverse.
+const SPIN_IN       = [0, 89.9, 90.1, 269.9, 270.1, 360]
+const SPIN_HEADS_OP = [1,    1,    0,     0,     1,    1]
+const SPIN_TAILS_OP = [0,    0,    1,     1,     0,    0]
+
+// (AnimatedG removed — SVG rotation driven via state listener instead)
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Analysing'>
-type StepState = 'waiting' | 'active' | 'done'
-
-const SVG_SIZE  = 260
-const RADAR_H   = 300
-const RING_SIZE = 186   // dashed ring diameter ≈ r=35 inner ring in SVG coords
-const BALL_SIZE = Math.round(RING_SIZE * 0.65)  // 121px — 65% of ring diameter
+type StepState = 'done' | 'active' | 'pending'
 
 const STEPS = [
-  { title: 'Decoding photos',             sub: '4 / 4 INGESTED' },
-  { title: 'Mapping surface texture',     sub: 'GRAIN · DENSITY · SHEEN' },
-  { title: 'Detecting cracks · moisture', sub: 'HIGH-PASS · SATURATION' },
-  { title: 'Comparing ends · A vs B',    sub: 'DIFFERENTIAL WEAR' },
-  { title: 'Pulling live weather',        sub: 'TEMP · DEW · WIND' },
-  { title: 'Generating match read',       sub: 'FORECAST · 1ST · 2ND INN' },
+  { label: 'Decoding photos',             sub: '4 / 4 ingested' },
+  { label: 'Mapping surface texture',     sub: 'grain · density · sheen' },
+  { label: 'Detecting cracks & moisture', sub: 'high-pass · saturation' },
+  { label: 'Comparing ends · A vs B',     sub: 'differential wear' },
+  { label: 'Pulling live weather',        sub: 'temp · dew · wind' },
+  { label: 'Generating match read',       sub: 'forecast · 1st · 2nd inn' },
 ]
+
+const HERO_SIZE  = 212
+const COIN_INSET = 0.17
+const COIN_SIZE  = Math.round(HERO_SIZE * (1 - COIN_INSET * 2))  // ~140px
+
+function useScrambler(period: number): string {
+  const [val, setVal] = useState(() => Math.floor(Math.random() * 100))
+  useEffect(() => {
+    const id = setInterval(
+      () => setVal(Math.floor(Math.random() * 100)),
+      period + Math.random() * 30,
+    )
+    return () => clearInterval(id)
+  }, [period])
+  return String(val).padStart(2, '0')
+}
+
+function localHHMM(): string {
+  const d = new Date()
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+}
 
 export default function AnalysingScreen({ route, navigation }: Props) {
   const { photos, groundName, overs, lat, lng, squad } = route.params
   const { userId } = useAuth()
 
-  const [stepStates, setStepStates] = useState<StepState[]>([
-    'active', 'waiting', 'waiting', 'waiting', 'waiting', 'waiting',
-  ])
-  const [step5Sub, setStep5Sub]     = useState('TEMP · DEW · WIND')
-  const [weatherPct, setWeatherPct] = useState(0)
-  const [error, setError]           = useState<string | null>(null)
-  const [radarValues, setRadarValues] = useState({
-    seam: '70°', moisture: '—%', cracks: '0.25', dewPt: '—°C',
+  const [fontsLoaded] = useFonts({
+    BricolageGrotesque_400Regular,
+    BricolageGrotesque_700Bold,
+    JetBrainsMono_400Regular,
+    JetBrainsMono_700Bold,
   })
 
-  // Animations
-  const ballAnim     = useRef(new Animated.Value(0)).current  // ball spins 7s (native)
-  const sweepAnim    = useRef(new Animated.Value(0)).current  // sweep rotates 2.4s (JS driver)
-  const pulseAnim    = useRef(new Animated.Value(1)).current  // active step pulse
-  const progressAnim = useRef(new Animated.Value(0)).current  // progress bar
-  const rotation     = useRef(new Animated.Value(0)).current  // dashed ring slow rotation (native)
+  // ── App state ────────────────────────────────────────────────────────────
+  const [stepStates, setStepStates] = useState<StepState[]>([
+    'active', 'pending', 'pending', 'pending', 'pending', 'pending',
+  ])
+  const [step5Sub, setStep5Sub] = useState(STEPS[4].sub)
+  const [pct, setPct]           = useState(0)
+  const [error, setError]       = useState<string | null>(null)
+  const [localTime]             = useState(localHHMM)
 
-  // Header step counter
-  const activeIdx   = stepStates.findIndex(s => s === 'active')
-  const currentStep = activeIdx >= 0 ? activeIdx + 1 : stepStates.filter(s => s === 'done').length
-  const stepNum     = String(currentStep).padStart(2, '0')
+  // Scramblers
+  const scrMoisture = useScrambler(160)
+  const scrCracks   = useScrambler(190)
+  const scrDew      = useScrambler(210)
+  const scrToken    = useScrambler(110)
 
+  // SVG rotation state — driven by sweepAnim listener (JS thread)
+  const [rotDeg, setRotDeg] = useState(0)
+
+  // ── Animations ──────────────────────────────────────────────────────────
+  const sweepAnim    = useRef(new Animated.Value(0)).current  // JS driver (SVG prop)
+  const breatheAnim  = useRef(new Animated.Value(0)).current
+  const dotPulse     = useRef(new Animated.Value(0)).current
+  const progressAnim = useRef(new Animated.Value(0)).current  // 0-100
+
+  // Coin entrance (native driver)
+  const coinTransY  = useRef(new Animated.Value(600)).current
+  const coinScale   = useRef(new Animated.Value(0.2)).current
+  const coinOpacity = useRef(new Animated.Value(0)).current
+  const coinRotX    = useRef(new Animated.Value(-90)).current
+  // Coin toss – rotateY applied per face
+  const coinRotY    = useRef(new Animated.Value(0)).current
+
+  // ── Derived interpolations ───────────────────────────────────────────────
+  const breatheScale   = breatheAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.1] })
+  const breatheOpacity = breatheAnim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] })
+
+  const dotScale   = dotPulse.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] })
+  const dotOpacity = dotPulse.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] })
+
+  const coinRotXDeg   = coinRotX.interpolate({ inputRange: [-90, 1440], outputRange: ['-90deg', '1440deg'] })
+  const coinFrontRotY = coinRotY.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] })
+  const coinBackRotY  = coinRotY.interpolate({ inputRange: [0, 360], outputRange: ['180deg', '540deg'] })
+  const progressWidth = progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] })
+
+  // Android-only: opacity drives visibility instead of relying on backfaceVisibility
+  const androidSpinHeadsOp = Platform.OS === 'android'
+    ? coinRotY.interpolate({ inputRange: SPIN_IN, outputRange: SPIN_HEADS_OP, extrapolate: 'clamp' })
+    : undefined
+  const androidSpinTailsOp = Platform.OS === 'android'
+    ? coinRotY.interpolate({ inputRange: SPIN_IN, outputRange: SPIN_TAILS_OP, extrapolate: 'clamp' })
+    : undefined
+
+  // ── Eyebrow step counter ─────────────────────────────────────────────────
+  const activeIdx = stepStates.findIndex(s => s === 'active')
+  const stepNum   = String(
+    Math.min(6, activeIdx >= 0 ? activeIdx + 1 : stepStates.filter(s => s === 'done').length)
+  ).padStart(2, '0')
+
+  // ── Preflight warmup (keep existing) ────────────────────────────────────
   useEffect(() => {
-    // Paywall gate — checked synchronously against in-memory store before any work starts
-    if (!usageStore.getIsSubscribed() && usageStore.getReportCount() >= 3) {
-      navigation.replace('Paywall')
-      return
-    }
+    fetch(process.env.EXPO_PUBLIC_FUNCTION_URL!, { method: 'OPTIONS' }).catch(() => {})
+  }, [])
 
-    // Ball spins 360° every 7 seconds — native driver (transform on Animated.View)
+  // ── Start all animations ─────────────────────────────────────────────────
+  useEffect(() => {
+    // Listener: drive SVG rotation state (JS thread; SVG can't use native driver)
+    const sweepListenerId = sweepAnim.addListener(({ value }) => setRotDeg(value * 360))
+
+    // Scanner sweep: 2.6s linear infinite (JS driver — SVG prop)
     Animated.loop(
-      Animated.timing(ballAnim, { toValue: 1, duration: 7000, useNativeDriver: true })
+      Animated.timing(sweepAnim, {
+        toValue: 1, duration: 2600, easing: Easing.linear, useNativeDriver: false,
+      })
     ).start()
 
-    // Dashed ring rotates 360° every 8 seconds — native driver
-    Animated.loop(
-      Animated.timing(rotation, { toValue: 1, duration: 8000, easing: Easing.linear, useNativeDriver: true })
-    ).start()
-
-    // Sweep arm rotates 360° every 2.4 seconds — JS driver (SVG string prop)
-    Animated.loop(
-      Animated.timing(sweepAnim, { toValue: 1, duration: 2400, useNativeDriver: false })
-    ).start()
-
-    // Active step breathe pulse
+    // Breathe: 1.4s ease-in-out infinite
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 0.3, duration: 700, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1,   duration: 700, useNativeDriver: true }),
+        Animated.timing(breatheAnim, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(breatheAnim, { toValue: 0, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
       ])
     ).start()
 
-    // Progress bar → 85% over 12s
-    Animated.timing(progressAnim, { toValue: 0.85, duration: 12000, useNativeDriver: false }).start()
+    // Dot pulse: 1s ease-in-out infinite
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(dotPulse, { toValue: 1, duration: 500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(dotPulse, { toValue: 0, duration: 500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    ).start()
 
-    // Simulated surface-analysis steps
-    const t1 = setTimeout(() => setStepStates(['done', 'active', 'waiting', 'waiting', 'waiting', 'waiting']), 300)
-    const t2 = setTimeout(() => setStepStates(['done', 'done', 'active', 'waiting', 'waiting', 'waiting']), 750)
-    const t3 = setTimeout(() => setStepStates(['done', 'done', 'done', 'active', 'waiting', 'waiting']), 1200)
-    const t4 = setTimeout(() => setStepStates(['done', 'done', 'done', 'done', 'active', 'waiting']), 1700)
+    // Coin entrance: coinEnter + coinSpinIn in parallel, once
+    Animated.parallel([
+      Animated.sequence([
+        Animated.timing(coinTransY, { toValue: -16, duration: 980,  easing: Easing.bezier(0.18, 0.7, 0.25, 1), useNativeDriver: true }),
+        Animated.timing(coinTransY, { toValue: 5,   duration: 238,  easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(coinTransY, { toValue: 0,   duration: 182,  easing: Easing.linear, useNativeDriver: true }),
+      ]),
+      Animated.sequence([
+        Animated.timing(coinScale, { toValue: 1.08,  duration: 980, easing: Easing.bezier(0.18, 0.7, 0.25, 1), useNativeDriver: true }),
+        Animated.timing(coinScale, { toValue: 0.985, duration: 238, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(coinScale, { toValue: 1,     duration: 182, easing: Easing.linear, useNativeDriver: true }),
+      ]),
+      Animated.timing(coinOpacity, { toValue: 1, duration: 420, easing: Easing.linear, useNativeDriver: true }),
+      Animated.timing(coinRotX, { toValue: 1440, duration: 1400, easing: Easing.bezier(0.12, 0.62, 0.2, 1), useNativeDriver: true }),
+    ]).start(() => {
+      // After entrance, start infinite coinToss (rotateY)
+      Animated.loop(
+        Animated.timing(coinRotY, {
+          toValue: 360, duration: 2600, easing: Easing.bezier(0.5, 0, 0.5, 1), useNativeDriver: true,
+        })
+      ).start()
+    })
 
-    // Fake weather-fetch percentage for step 5
-    let pct = 0
-    const pctInterval = setInterval(() => {
-      pct = Math.min(pct + Math.random() * 5 + 1, 95)
-      setWeatherPct(Math.floor(pct))
-    }, 350)
+    return () => {
+      sweepAnim.removeListener(sweepListenerId)
+    }
+  }, [])
+
+  // ── Progress listener ────────────────────────────────────────────────────
+  useEffect(() => {
+    const id = progressAnim.addListener(({ value }) => setPct(Math.round(value)))
+    return () => progressAnim.removeListener(id)
+  }, [])
+
+  // ── Main analysis effect (preserve existing logic) ────────────────────────
+  useEffect(() => {
+    if (!usageStore.getIsSubscribed() && usageStore.getReportCount() >= 3) {
+      navigation.replace('Paywall', { trigger: 'limit_reached' })
+      return
+    }
+
+    // Simulated surface-analysis steps (same timing as original)
+    const t1 = setTimeout(() => setStepStates(['done', 'active',   'pending', 'pending', 'pending', 'pending']), 300)
+    const t2 = setTimeout(() => setStepStates(['done', 'done',     'active',  'pending', 'pending', 'pending']), 750)
+    const t3 = setTimeout(() => setStepStates(['done', 'done',     'done',    'active',  'pending', 'pending']), 1200)
+    const t4 = setTimeout(() => setStepStates(['done', 'done',     'done',    'done',    'active',  'pending']), 1700)
+
+    // Progress → 85% over 12s (same as original)
+    Animated.timing(progressAnim, { toValue: 85, duration: 12000, useNativeDriver: false }).start()
 
     ;(async () => {
       try {
-        console.log('[AnalysingScreen] userId:', userId ?? 'anonymous')
-        const result = await analysePitch({ imageBase64Array: photos, lat, lng, groundName, overs, squad, userId: userId ?? null })
+        const clientReportId = ExpoCrypto.randomUUID()
+        const cachedWeather  = weatherCache.get(lat, lng)
+        const result = await analysePitch({
+          imageBase64Array: photos, lat, lng, groundName, overs, squad,
+          userId: userId ?? null, weather: cachedWeather, reportId: clientReportId,
+        })
 
-        clearInterval(pctInterval)
-        setWeatherPct(100)
+        const general    = result?.general ?? result?.prediction ?? result
+        const teamResult = result?.team ?? null
 
         const weather    = result?.weather ?? {}
         const conditions = weather?.conditions ?? weather?.description ?? result?.conditions ?? ''
-        const humidity   = weather?.humidity_percent
-        const dewTemp    = weather?.forecast_afternoon_temp ?? weather?.dew_point
-
-        const cl = conditions.toLowerCase()
-        let seamVal = '70°'
-        if (cl.includes('wet') || cl.includes('rain') || cl.includes('shower')) seamVal = '85°'
-        else if (cl.includes('damp')) seamVal = '70°'
-        else if (cl.includes('dry') || cl.includes('hard')) seamVal = '45°'
-
-        const rain7 = weather?.rain_last_7days_mm ?? weather?.rain_last_7days ?? weather?.precipitation_7d ?? null
-        let cracksVal = '0.25'
-        if (rain7 !== null) cracksVal = rain7 > 10 ? '0.1' : rain7 > 3 ? '0.25' : '0.8'
-
-        setRadarValues({
-          seam:     seamVal,
-          moisture: humidity != null ? `${Math.round(humidity)}%` : '—%',
-          cracks:   cracksVal,
-          dewPt:    dewTemp != null ? `${Math.round(dewTemp)}°C` : '—°C',
-        })
 
         if (conditions) setStep5Sub(`${groundName.toUpperCase()} · ${conditions.toUpperCase()}`)
         else            setStep5Sub(groundName.toUpperCase())
 
         setStepStates(['done', 'done', 'done', 'done', 'done', 'active'])
-        Animated.timing(progressAnim, { toValue: 1, duration: 700, useNativeDriver: false }).start()
+        Animated.timing(progressAnim, { toValue: 100, duration: 700, useNativeDriver: false }).start()
 
         await usageStore.incrementReportCount()
 
-        const reportId: string | undefined = result?.reportId ?? undefined
+        const reportId: string = result?.reportId ?? clientReportId
 
-        // Save to local history so it always shows in match history
         reportHistoryStore.save({
-          id: reportId ?? `local_${Date.now()}`,
-          ground_name: groundName,
+          id:           reportId ?? `local_${Date.now()}`,
+          ground_name:  groundName,
           overs,
-          match_date: new Date().toISOString().split('T')[0],
-          created_at: new Date().toISOString(),
-          prediction: result?.prediction ?? {},
-          weather: result?.weather ?? {},
+          match_date:   new Date().toISOString().split('T')[0],
+          created_at:   new Date().toISOString(),
+          prediction:   general,
+          weather:      result?.weather ?? {},
+        }).then(() => {
+          scheduleReminderNotification(reportId, groundName)
         }).catch(() => {})
 
-        setTimeout(() => navigation.navigate('Report', { result, groundName, overs, squad, reportId }), 900)
+        const reportFormat =
+          overs === 20 ? 'T20' :
+          overs === 40 ? 'T40' :
+          overs === 50 ? 'ODI' : 'custom'
+        track('report_generated', {
+          ground_name: groundName,
+          format: reportFormat,
+          overs,
+          photo_count: photos.length,
+          squad_entered: !!squad,
+          has_weather: !!(result?.weather && Object.keys(result.weather).length > 0),
+        })
+
+        const reportResult = { prediction: general, weather: result?.weather ?? {} }
+        setTimeout(() => navigation.replace('Report', { result: reportResult, teamResult, groundName, overs, squad, reportId }), 350)
       } catch (err) {
-        clearInterval(pctInterval)
         setError(err instanceof Error ? err.message : 'Something went wrong')
       }
     })()
 
     return () => {
       clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4)
-      clearInterval(pctInterval)
     }
   }, [])
 
-  // Ball rotation — native driver
-  const ballRotate = ballAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] })
-
-  // Dashed ring rotation — native driver
-  const rotateInterpolation = rotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] })
-
-  // Sweep arm — JS driver, SVG transform string
-  const sweepTransform = sweepAnim.interpolate({
-    inputRange:  [0, 1],
-    outputRange: ['rotate(0 50 50)', 'rotate(360 50 50)'],
-  })
-
-  const progressPct = progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] })
-
+  // ── Error state ──────────────────────────────────────────────────────────
   if (error) {
     return (
       <SafeAreaView style={styles.errorRoot}>
@@ -223,189 +317,241 @@ export default function AnalysingScreen({ route, navigation }: Props) {
     )
   }
 
-  const stepSubs = [STEPS[0].sub, STEPS[1].sub, STEPS[2].sub, STEPS[3].sub, step5Sub, STEPS[5].sub]
+  // Block render until fonts ready (avoids flash of unstyled text)
+  if (!fontsLoaded) return <View style={styles.fontWait} />
 
   return (
     <View style={styles.root}>
-      {/* Subtle horizontal grid lines */}
-      {Array.from({ length: 16 }).map((_, i) => (
-        <View key={i} style={[styles.gridLine, { top: 44 + i * 52 }]} />
-      ))}
+      {/* Background: approximate radial-gradient with linear */}
+      <LinearGradient
+        colors={[A.spot, A.bg, '#e8e0cb']}
+        locations={[0, 0.58, 1]}
+        style={StyleSheet.absoluteFill}
+      />
 
       <SafeAreaView style={styles.safe}>
 
-        {/* ── Header ── */}
-        <View style={styles.headerBar}>
-          <View style={styles.headerLeft}>
-            <View style={styles.redDot} />
-            <Text style={styles.analyzingText}>ANALYZING</Text>
+        {/* ── A) HEADER ───────────────────────────────────────────────────── */}
+        <View style={styles.header}>
+          <View style={styles.eyebrowRow}>
+            <View style={styles.eyebrowLeft}>
+              <Animated.View style={[
+                styles.breatheDot,
+                { transform: [{ scale: breatheScale }], opacity: breatheOpacity },
+              ]} />
+              <Text style={styles.eyebrowText}>ANALYZING</Text>
+            </View>
+            <Text style={styles.eyebrowText}>STEP {stepNum} / 06</Text>
           </View>
-          <Text style={styles.stepCounter}>STEP {stepNum} / 06</Text>
-        </View>
-        <View style={styles.headerDivider} />
-
-        {/* ── Hero ── */}
-        <View style={styles.hero}>
-          <Text style={styles.heroTop}>Reading the</Text>
-          <Text style={styles.heroBottom}>pitch report.</Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.titleMain}>Reading the </Text>
+            <Text style={styles.titleItalic}>pitch report.</Text>
+          </View>
         </View>
 
-        {/* ── Radar section ── */}
-        <View style={styles.radar}>
+        {/* ── B) HERO — coin + scanner ring ───────────────────────────────── */}
+        <View style={styles.heroWrap}>
+          {/* Static scanner rings and tick marks */}
+          <View style={styles.scannerStatic} pointerEvents="none">
+            <Svg width={HERO_SIZE} height={HERO_SIZE} viewBox="0 0 100 100">
+              <Circle cx="50" cy="50" r="48.5" fill="none" stroke={A.inkFaint} strokeWidth="0.4" />
+              <Circle cx="50" cy="50" r="44"   fill="none" stroke={A.inkFaint} strokeWidth="0.3"
+                strokeDasharray="0.5 2.2" />
+              {Array.from({ length: 60 }).map((_, i) => {
+                const major = i % 5 === 0
+                return (
+                  <Line key={i}
+                    x1="50" y1={major ? 1.5 : 2.2}
+                    x2="50" y2={major ? 4.0 : 3.2}
+                    stroke={A.ink}
+                    strokeOpacity={major ? 0.35 : 0.14}
+                    strokeWidth={major ? 0.5 : 0.3}
+                    transform={`rotate(${i * 6} 50 50)`}
+                  />
+                )
+              })}
+            </Svg>
+          </View>
 
-          {/* Crosshair lines through ball center */}
-          <View style={styles.crossH} />
-          <View style={styles.crossV} />
+          {/* Rotating sweep arm + orbiting dot — state-driven SVG transform */}
+          <View style={styles.scannerRotating} pointerEvents="none">
+            <Svg width={HERO_SIZE} height={HERO_SIZE} viewBox="0 0 100 100">
+              {/* rotate(deg cx cy) — SVG-native pivot, always correct */}
+              <G transform={`rotate(${rotDeg} 50 50)`}>
+                {/* Sweep wedge fill */}
+                <Path
+                  d="M50 50 L50 1.5 A48.5 48.5 0 0 1 82.5 14.5 Z"
+                  fill={A.oxblood}
+                  fillOpacity={0.16}
+                />
+                {/* Orbiting dot glow (larger, low opacity) */}
+                <Circle cx="50" cy="2.5" r="4"   fill={A.oxblood} fillOpacity={0.18} />
+                {/* Orbiting dot solid */}
+                <Circle cx="50" cy="2.5" r="2.2" fill={A.oxblood} fillOpacity={0.9} />
+                {/* Progress arc accent — rotates with sweep */}
+                <Circle cx="50" cy="50" r="48.5" fill="none"
+                  stroke={A.oxblood} strokeOpacity="0.45" strokeWidth="0.9"
+                  strokeDasharray="22 285" strokeLinecap="round"
+                />
+              </G>
+            </Svg>
+          </View>
 
-          {/* Cricket ball — spins 7s, clipped circular, BEHIND SVG */}
-          <Animated.View style={[styles.ballWrap, { transform: [{ rotate: ballRotate }] }]}>
-            <Image
-              source={require('../../assets/cricket-ball.png')}
-              style={{ width: BALL_SIZE, height: BALL_SIZE, borderRadius: BALL_SIZE / 2 }}
-              resizeMode="cover"
+          {/* Coin flip */}
+          <Animated.View style={[
+            styles.coinWrap,
+            {
+              opacity:   coinOpacity,
+              transform: [
+                { translateY: coinTransY },
+                { scale:      coinScale  },
+                { perspective: 800       },
+                { rotateX:    coinRotXDeg },
+              ],
+            },
+          ]}>
+            {/* Front face — coin emblem (heads) */}
+            <Animated.Image
+              source={COIN_EMBLEM}
+              style={[
+                styles.coinFace,
+                {
+                  backfaceVisibility: 'hidden',
+                  transform: [{ perspective: 800 }, { rotateY: coinFrontRotY }],
+                },
+                androidSpinHeadsOp !== undefined && { opacity: androidSpinHeadsOp },
+              ]}
+              resizeMode="contain"
+            />
+            {/* Back face — coin tails (wicket/stumps), pre-rotated 180° */}
+            <Animated.Image
+              source={COIN_TAILS}
+              style={[
+                styles.coinFace,
+                {
+                  backfaceVisibility: 'hidden',
+                  transform: [{ perspective: 800 }, { rotateY: coinBackRotY }],
+                },
+                androidSpinTailsOp !== undefined && { opacity: androidSpinTailsOp },
+              ]}
+              resizeMode="contain"
             />
           </Animated.View>
+        </View>
 
-          {/* SVG radar overlay — exact copy from Analyzing.html */}
-          <Svg
-            width={SVG_SIZE}
-            height={SVG_SIZE}
-            viewBox="0 0 100 100"
-            style={styles.svgOverlay}
-          >
-            <Defs>
-              {/* Sweep arm gradient: transparent → red */}
-              <SvgLinearGradient id="as_sweep" x1="0" y1="0" x2="1" y2="0">
-                <Stop offset="0%"   stopColor="#a8331f" stopOpacity={0}    />
-                <Stop offset="80%"  stopColor="#a8331f" stopOpacity={0.55} />
-                <Stop offset="100%" stopColor="#a8331f" stopOpacity={0.9}  />
-              </SvgLinearGradient>
-
-              {/* Radial glow: transparent core → soft red edge */}
-              <SvgRadialGradient id="as_glow" cx="50%" cy="50%" r="50%">
-                <Stop offset="60%"  stopColor="rgba(217,75,58,0)"    />
-                <Stop offset="100%" stopColor="rgba(217,75,58,0.18)" />
-              </SvgRadialGradient>
-            </Defs>
-
-            {/* Outer solid ring r=48 */}
-            <Circle cx="50" cy="50" r={48} fill="none" stroke="rgba(26,14,12,0.18)" strokeWidth={0.3} />
-
-            {/* Middle dashed ring r=42 — exact stroke-dasharray from HTML */}
-            <Circle cx="50" cy="50" r={42} fill="none" stroke="rgba(26,14,12,0.18)" strokeWidth={0.3} strokeDasharray="0.6 1.4" />
-
-            {/* Inner solid ring r=35 */}
-            <Circle cx="50" cy="50" r={35} fill="none" stroke="rgba(26,14,12,0.18)" strokeWidth={0.25} />
-
-            {/* Cardinal tick marks — 4 short lines at N/E/S/W */}
-            <Line x1="50" y1="2" x2="50" y2="6" stroke="#1a0e0c" strokeOpacity={0.4} strokeWidth={0.5} />
-            <Line x1="50" y1="2" x2="50" y2="6" stroke="#1a0e0c" strokeOpacity={0.4} strokeWidth={0.5} transform="rotate(90 50 50)"  />
-            <Line x1="50" y1="2" x2="50" y2="6" stroke="#1a0e0c" strokeOpacity={0.4} strokeWidth={0.5} transform="rotate(180 50 50)" />
-            <Line x1="50" y1="2" x2="50" y2="6" stroke="#1a0e0c" strokeOpacity={0.4} strokeWidth={0.5} transform="rotate(270 50 50)" />
-
-            {/* Radial edge glow */}
-            <Circle cx="50" cy="50" r={49} fill="url(#as_glow)" />
-
-            {/* Sweep arm — rotates 360° every 2.4s */}
-            <AnimatedG transform={sweepTransform}>
-              <Path
-                d="M50 50 L50 2 A48 48 0 0 1 91 26 Z"
-                fill="url(#as_sweep)"
-                opacity={0.75}
-              />
-            </AnimatedG>
-          </Svg>
-
-          {/* Dashed ring — rotates 8s around the ball */}
-          <Animated.View style={[styles.ringWrap, { transform: [{ rotate: rotateInterpolation }] }]}>
-            <Svg width={RING_SIZE} height={RING_SIZE}>
-              <Circle
-                cx={RING_SIZE / 2}
-                cy={RING_SIZE / 2}
-                r={RING_SIZE / 2 - 2}
-                fill="none"
-                stroke="#c0392b"
-                strokeWidth="1"
-                strokeDasharray="4 8"
-                opacity={0.4}
-              />
-            </Svg>
-          </Animated.View>
-
-          {/* Data point labels — four compass corners */}
-          <View style={[styles.dataPoint, styles.dataTL]}>
-            <Text style={styles.dataLabel}>SEAM</Text>
-            <Text style={styles.dataValue}>{radarValues.seam}</Text>
+        {/* ── C) TELEMETRY STRIP ──────────────────────────────────────────── */}
+        <View style={styles.telemCard}>
+          <View style={styles.telemCell}>
+            <Text style={styles.telemLabel}>SEAM</Text>
+            <Text style={styles.telemValue}>70°</Text>
           </View>
-          <View style={[styles.dataPoint, styles.dataTR]}>
-            <Text style={[styles.dataLabel, styles.dataRight]}>MOISTURE</Text>
-            <Text style={[styles.dataValue, styles.dataRight]}>{radarValues.moisture}</Text>
+          <View style={styles.telemDivider} />
+          <View style={styles.telemCell}>
+            <Text style={styles.telemLabel}>MOISTURE</Text>
+            <Text style={styles.telemValue}>{scrMoisture}%</Text>
           </View>
-          <View style={[styles.dataPoint, styles.dataBL]}>
-            <Text style={styles.dataLabel}>CRACKS</Text>
-            <Text style={styles.dataValue}>{radarValues.cracks}</Text>
+          <View style={styles.telemDivider} />
+          <View style={styles.telemCell}>
+            <Text style={styles.telemLabel}>CRACKS</Text>
+            <Text style={styles.telemValue}>0.{scrCracks}</Text>
           </View>
-          <View style={[styles.dataPoint, styles.dataBR]}>
-            <Text style={[styles.dataLabel, styles.dataRight]}>DEW · PT</Text>
-            <Text style={[styles.dataValue, styles.dataRight]}>{radarValues.dewPt}</Text>
+          <View style={styles.telemDivider} />
+          <View style={styles.telemCell}>
+            <Text style={styles.telemLabel}>DEW PT</Text>
+            <Text style={styles.telemValue}>{scrDew}°</Text>
           </View>
         </View>
 
-        {/* ── Analysis steps ── */}
-        <View style={styles.stepsList}>
+        {/* ── D) STEP TIMELINE ────────────────────────────────────────────── */}
+        <View style={styles.stepList}>
           {STEPS.map((step, i) => {
             const state    = stepStates[i]
             const isDone   = state === 'done'
             const isActive = state === 'active'
-
-            const rightLabel = isDone
-              ? 'OK'
-              : isActive && i === 4
-                ? `${weatherPct}%`
-                : isActive
-                  ? '..'
-                  : ''
+            const isLast   = i === STEPS.length - 1
+            const sub      = i === 4 && isActive ? step5Sub : step.sub
 
             return (
-              <Animated.View
+              <View
                 key={i}
-                style={[styles.stepRow, isActive && { opacity: pulseAnim }]}
+                style={[styles.stepRow, { opacity: isDone ? 0.7 : isActive ? 1 : 0.45 }]}
               >
-                <View style={[
-                  styles.circle,
-                  isDone   ? styles.circleDone   :
-                  isActive ? styles.circleActive  :
-                             styles.circleWaiting,
-                ]}>
-                  {isDone   && <Text style={styles.tick}>✓</Text>}
-                  {isActive && <View style={styles.activeDot} />}
+                {/* Timeline: circle + connector */}
+                <View style={styles.timelineCol}>
+                  <View style={[
+                    styles.stepCircle,
+                    isDone   ? styles.circleDone    :
+                    isActive ? styles.circleActive  :
+                               styles.circlePending,
+                  ]}>
+                    {isDone && (
+                      <Svg width={11} height={11} viewBox="0 0 24 24">
+                        <Path d="M5 12.5l4 4 10-10" stroke="#f5ead0" strokeWidth="3"
+                          strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </Svg>
+                    )}
+                    {isActive && (
+                      <Animated.View style={[
+                        styles.activeDot,
+                        { transform: [{ scale: dotScale }], opacity: dotOpacity },
+                      ]} />
+                    )}
+                  </View>
+                  {!isLast && (
+                    <View style={[
+                      styles.stepConnector,
+                      { backgroundColor: isDone ? A.oxblood : A.inkHair },
+                    ]} />
+                  )}
                 </View>
 
-                <View style={styles.stepBody}>
-                  <Text style={[styles.stepTitle, !(isDone || isActive) && styles.stepTitleMuted]}>
-                    {step.title}
-                  </Text>
-                  <Text style={styles.stepSub}>{stepSubs[i]}</Text>
+                {/* Label + status token */}
+                <View style={[styles.stepBody, !isLast && { paddingBottom: 11 }]}>
+                  <View style={styles.stepTopRow}>
+                    <Text style={[
+                      styles.stepLabel,
+                      isActive && { fontFamily: 'BricolageGrotesque_700Bold' },
+                    ]}>
+                      {step.label}
+                    </Text>
+                    <Text style={[styles.stepToken, isDone && { color: A.ok }]}>
+                      {isDone ? 'OK' : isActive ? scrToken : '··'}
+                    </Text>
+                  </View>
+                  {(isDone || isActive) && (
+                    <Text style={[
+                      styles.stepSub,
+                      { color: isActive ? A.oxblood : A.inkLow },
+                    ]}>
+                      {sub.toUpperCase()}
+                    </Text>
+                  )}
                 </View>
-
-                <Text style={[styles.stepRight, isDone && styles.stepRightDone]}>
-                  {rightLabel}
-                </Text>
-              </Animated.View>
+              </View>
             )
           })}
         </View>
 
-        {/* ── Progress bar ── */}
-        <View style={styles.progressTrack}>
-          <Animated.View style={[styles.progressFill, { width: progressPct }]}>
-            <LinearGradient
-              colors={[C.red, '#D44C3A', '#E8BF8C', C.cream]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={StyleSheet.absoluteFill}
-            />
-          </Animated.View>
+        {/* ── E) PROGRESS RAIL ────────────────────────────────────────────── */}
+        <View style={styles.progressRail}>
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressLabel} numberOfLines={1}>
+              {groundName.toUpperCase()} · {localTime}
+            </Text>
+            <Text style={styles.progressPct}>
+              {String(pct).padStart(2, '0')}
+              <Text style={styles.progressPctUnit}>%</Text>
+            </Text>
+          </View>
+          <View style={styles.progressTrack}>
+            <Animated.View style={[styles.progressFill, { width: progressWidth }]}>
+              <LinearGradient
+                colors={[A.oxblood, '#d97a4a']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={StyleSheet.absoluteFill}
+              />
+            </Animated.View>
+          </View>
         </View>
 
       </SafeAreaView>
@@ -413,135 +559,190 @@ export default function AnalysingScreen({ route, navigation }: Props) {
   )
 }
 
-const SVG_TOP  = (RADAR_H - SVG_SIZE) / 2
-
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.cream },
-  safe: { flex: 1 },
+  // Root
+  root:     { flex: 1 },
+  safe:     { flex: 1 },
+  fontWait: { flex: 1, backgroundColor: A.bg },
 
   // Error
   errorRoot: {
-    flex: 1, backgroundColor: C.cream,
+    flex: 1, backgroundColor: A.bg,
     alignItems: 'center', justifyContent: 'center', padding: 24,
   },
-  errorText:    { color: C.red, fontSize: 15, textAlign: 'center', marginBottom: 20 },
-  retryBtn:     { backgroundColor: C.dark, paddingVertical: 12, paddingHorizontal: 32, borderRadius: 10 },
-  retryBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
-
-  // Grid
-  gridLine: {
-    position: 'absolute', left: 0, right: 0,
-    height: 1, backgroundColor: C.gridLine,
+  errorText: {
+    color: A.oxblood, fontSize: 15, textAlign: 'center', marginBottom: 20,
+    fontFamily: 'JetBrainsMono_400Regular',
   },
+  retryBtn:     { backgroundColor: A.oxblood, paddingVertical: 12, paddingHorizontal: 32, borderRadius: 10 },
+  retryBtnText: { color: '#FFFDF7', fontSize: 15, fontWeight: '600' },
 
-  // Header
-  headerBar: {
+  // ── A) Header
+  header: { paddingHorizontal: 24, paddingTop: 16 },
+  eyebrowRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12,
   },
-  headerLeft:    { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  redDot:        { width: 6, height: 6, borderRadius: 3, backgroundColor: C.red },
-  analyzingText: { fontSize: 10, fontWeight: '700', letterSpacing: 2.2, color: C.red },
-  stepCounter:   { fontSize: 10, fontWeight: '600', letterSpacing: 2, color: C.mutedText },
-  headerDivider: { height: 1, backgroundColor: C.divider, marginHorizontal: 16 },
-
-  // Hero
-  hero: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4 },
-  heroTop: {
-    fontSize: 38, fontWeight: '800', color: C.dark, lineHeight: 44,
+  eyebrowLeft: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  breatheDot:  { width: 6, height: 6, borderRadius: 3, backgroundColor: A.oxblood },
+  eyebrowText: {
+    fontFamily:    'JetBrainsMono_400Regular',
+    fontSize:      10,
+    letterSpacing: 2.6,
+    color:         A.inkSoft,
+    textTransform: 'uppercase',
   },
-  heroBottom: {
-    fontSize: 38, fontWeight: '700', fontStyle: 'italic',
-    color: C.red, lineHeight: 44, letterSpacing: -1, marginTop: -4,
+  titleRow: { marginTop: 12, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline' },
+  titleMain: {
+    fontFamily:    'BricolageGrotesque_700Bold',
+    fontSize:      30,
+    lineHeight:    29,
+    letterSpacing: -1.05,
+    color:         A.ink,
   },
-
-  // Radar section
-  radar: {
-    width: SW, height: RADAR_H,
-    alignSelf: 'center', position: 'relative',
-  },
-  crossH: {
-    position: 'absolute',
-    top: (RADAR_H - 0.5) / 2,
-    alignSelf: 'center',
-    width: RING_SIZE,
-    height: 0.5,
-    backgroundColor: '#8B1A1A',
-    opacity: 0.2,
-  },
-  crossV: {
-    position: 'absolute',
-    top: (RADAR_H - RING_SIZE) / 2,
-    alignSelf: 'center',
-    width: 0.5,
-    height: RING_SIZE,
-    backgroundColor: '#8B1A1A',
-    opacity: 0.2,
-  },
-  // Ball — circular clipped, spins behind SVG
-  ballWrap: {
-    position: 'absolute',
-    top: (RADAR_H - BALL_SIZE) / 2,
-    alignSelf: 'center',
-    width: BALL_SIZE,
-    height: BALL_SIZE,
-    borderRadius: BALL_SIZE / 2,
-    overflow: 'hidden',
-  },
-  // Dashed rotating ring — sits just outside the ball
-  ringWrap: {
-    position: 'absolute',
-    top: (RADAR_H - RING_SIZE) / 2,
-    alignSelf: 'center',
-  },
-  // SVG overlay — on top of ball
-  svgOverlay: {
-    position: 'absolute',
-    top: SVG_TOP,
-    alignSelf: 'center',
+  titleItalic: {
+    fontFamily:    'BricolageGrotesque_400Regular',
+    fontSize:      30,
+    lineHeight:    29,
+    letterSpacing: -1.05,
+    color:         A.oxblood,
+    fontStyle:     'italic',
   },
 
-  // Data labels
-  dataPoint: { position: 'absolute' },
-  dataTL: { top: 42, left: 16 },
-  dataTR: { top: 42, right: 16 },
-  dataBL: { bottom: 42, left: 16 },
-  dataBR: { bottom: 42, right: 16 },
-  dataLabel: {
-    fontSize: 8, fontWeight: '700', letterSpacing: 2,
-    color: C.red, marginBottom: 3,
+  // ── B) Hero
+  heroWrap: {
+    width:     HERO_SIZE,
+    height:    HERO_SIZE,
+    alignSelf: 'center',
+    marginTop: 20,
   },
-  dataRight:  { textAlign: 'right' },
-  dataValue: {
-    fontSize: 26, fontWeight: '800', color: C.dark, lineHeight: 30,
+  scannerStatic: {
+    position: 'absolute', top: 0, left: 0,
+    width: HERO_SIZE, height: HERO_SIZE,
+  },
+  scannerRotating: {
+    position: 'absolute', top: 0, left: 0,
+    width: HERO_SIZE, height: HERO_SIZE,
+  },
+  coinWrap: {
+    position: 'absolute',
+    top:      Math.round(HERO_SIZE * COIN_INSET),
+    left:     Math.round(HERO_SIZE * COIN_INSET),
+    width:    COIN_SIZE,
+    height:   COIN_SIZE,
+  },
+  coinFace: {
+    position: 'absolute',
+    top: 0, left: 0,
+    width:  COIN_SIZE,
+    height: COIN_SIZE,
   },
 
-  // Steps
-  stepsList: { paddingHorizontal: 16, flex: 1 },
-  stepRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.divider,
+  // ── C) Telemetry
+  telemCard: {
+    flexDirection:   'row',
+    marginHorizontal: 24,
+    marginTop:        14,
+    backgroundColor: 'rgba(255,248,232,0.7)',
+    borderRadius:     14,
+    borderWidth:      1,
+    borderColor:      A.inkFaint,
+    paddingVertical:  12,
+    paddingHorizontal: 6,
+    alignItems:       'stretch',
   },
-  circle: {
+  telemCell:    { flex: 1, alignItems: 'center', gap: 4 },
+  telemDivider: { width: 1, backgroundColor: A.inkHair },
+  telemLabel: {
+    fontFamily:    'JetBrainsMono_400Regular',
+    fontSize:      8.5,
+    letterSpacing: 1.5,
+    color:         A.oxblood,
+    textTransform: 'uppercase',
+  },
+  telemValue: {
+    fontFamily: 'JetBrainsMono_700Bold',
+    fontSize:   16,
+    color:      A.ink,
+  },
+
+  // ── D) Step timeline
+  stepList: { paddingHorizontal: 28, marginTop: 14, flex: 1 },
+  stepRow:  { flexDirection: 'row', gap: 14 },
+  timelineCol: { width: 20, alignItems: 'center' },
+  stepCircle: {
     width: 20, height: 20, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+    alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0, zIndex: 2,
   },
-  circleDone:    { backgroundColor: C.red },
-  circleActive:  { backgroundColor: 'transparent', borderWidth: 2, borderColor: C.red },
-  circleWaiting: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: C.veryMuted },
-  tick:          { color: '#fff', fontSize: 10, fontWeight: '700' },
-  activeDot:     { width: 7, height: 7, borderRadius: 3.5, backgroundColor: C.red },
+  circleDone: {
+    backgroundColor: A.oxblood,
+    borderWidth: 1, borderColor: A.oxblood,
+  },
+  circleActive: {
+    backgroundColor: A.bg,
+    borderWidth: 1.5, borderColor: A.ink,
+  },
+  circlePending: {
+    backgroundColor: A.bg,
+    borderWidth: 1, borderColor: A.inkFaint,
+  },
+  activeDot: {
+    width: 7, height: 7, borderRadius: 3.5, backgroundColor: A.ink,
+  },
+  stepConnector: { width: 1.5, flex: 1, minHeight: 13 },
   stepBody:      { flex: 1 },
-  stepTitle:     { fontSize: 13, fontWeight: '600', color: C.dark, lineHeight: 17 },
-  stepTitleMuted:{ color: C.dimText, fontWeight: '400' },
-  stepSub: {
-    fontSize: 8, fontWeight: '600', letterSpacing: 0.8,
-    color: C.mutedText, lineHeight: 12, marginTop: 1,
+  stepTopRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline',
   },
-  stepRight:     { fontSize: 9, fontWeight: '700', letterSpacing: 1.2, color: C.dimText, minWidth: 28, textAlign: 'right' },
-  stepRightDone: { color: C.red },
+  stepLabel: {
+    fontFamily:    'BricolageGrotesque_400Regular',
+    fontSize:      15,
+    color:         A.ink,
+    letterSpacing: -0.15,
+    flex:          1,
+  },
+  stepToken: {
+    fontFamily:    'JetBrainsMono_400Regular',
+    fontSize:      9.5,
+    letterSpacing: 1.5,
+    color:         A.inkLow,
+    marginLeft:    8,
+  },
+  stepSub: {
+    fontFamily:    'JetBrainsMono_400Regular',
+    fontSize:      9.5,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginTop:     3,
+  },
 
-  // Progress
-  progressTrack: { height: 4, backgroundColor: 'rgba(26,14,12,0.08)', overflow: 'hidden' },
-  progressFill:  { height: '100%', overflow: 'hidden' },
+  // ── E) Progress rail
+  progressRail: { paddingHorizontal: 28, paddingBottom: 14 },
+  progressHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'baseline', marginBottom: 8,
+  },
+  progressLabel: {
+    fontFamily:    'JetBrainsMono_400Regular',
+    fontSize:      10,
+    letterSpacing: 2,
+    color:         A.inkSoft,
+    textTransform: 'uppercase',
+    flex:          1,
+    marginRight:   8,
+  },
+  progressPct: {
+    fontFamily: 'JetBrainsMono_700Bold',
+    fontSize:   14,
+    color:      A.ink,
+  },
+  progressPctUnit: {
+    fontFamily: 'JetBrainsMono_400Regular',
+    fontSize:   11,
+    color:      A.inkLow,
+  },
+  progressTrack: {
+    height: 3, backgroundColor: A.inkFaint, borderRadius: 2, overflow: 'hidden',
+  },
+  progressFill: { height: '100%', overflow: 'hidden' },
 })

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -6,28 +6,233 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
-  SafeAreaView,
+  Animated,
+  Dimensions,
+  Modal,
+  Pressable,
 } from 'react-native'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFocusEffect } from '@react-navigation/native'
-import { useAuth } from '@clerk/clerk-expo'
+import { useAuth, useUser } from '@clerk/clerk-expo'
+import Svg, { Polygon, Defs, RadialGradient, Stop } from 'react-native-svg'
+import UserAvatar from '../components/UserAvatar'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '../../App'
 import { useSupabaseClient } from '../lib/supabaseClient'
 import { reportHistoryStore } from '../lib/reportHistoryStore'
+import { track } from '../lib/analytics'
+import { OfflineContext } from '../lib/offlineContext'
+import AppHeader from '../components/AppHeader'
+
+const { width: SW } = Dimensions.get('window')
+const DRAWER_W = Math.min(SW * 0.86, 330)
+
+function CoinMark({ outer = 38, inner = 34 }: { outer?: number; inner?: number }) {
+  const s = inner
+  const pts = (
+    [[50,0],[89.1,18.8],[98.7,61.1],[71.7,95],[28.3,95],[1.3,61.1],[10.9,18.8]] as [number,number][]
+  ).map(([x, y]) => `${+(x*s/100).toFixed(3)},${+(y*s/100).toFixed(3)}`).join(' ')
+  const cx = s * 0.38, cy = s * 0.30, r = s * 0.55
+  return (
+    <View style={{ width: outer, height: outer, alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={s} height={s} viewBox={`0 0 ${s} ${s}`}>
+        <Defs>
+          <RadialGradient id="hcg" cx={`${cx}`} cy={`${cy}`} r={`${r}`} gradientUnits="userSpaceOnUse">
+            <Stop offset="0%"   stopColor="#b8472f" />
+            <Stop offset="45%"  stopColor="#9a3522" />
+            <Stop offset="100%" stopColor="#6f2417" />
+          </RadialGradient>
+        </Defs>
+        <Polygon points={pts} fill="url(#hcg)" />
+      </Svg>
+    </View>
+  )
+}
+
+function BurgerDrawer({
+  visible,
+  onClose,
+  onHome,
+  onHistory,
+  onSettings,
+  onHowItWorks,
+  onPrivacy,
+  onFeedback,
+}: {
+  visible: boolean
+  onClose: () => void
+  onHome: () => void
+  onHistory: () => void
+  onSettings: () => void
+  onHowItWorks: () => void
+  onPrivacy: () => void
+  onFeedback: () => void
+}) {
+  const insets = useSafeAreaInsets()
+  const { user } = useUser()
+  const tx = useRef(new Animated.Value(DRAWER_W)).current
+
+  useEffect(() => {
+    Animated.timing(tx, {
+      toValue: visible ? 0 : DRAWER_W,
+      duration: visible ? 260 : 220,
+      useNativeDriver: true,
+    }).start()
+  }, [visible])
+
+  const handleItem = (key: string | null) => {
+    onClose()
+    if (key === 'home')        setTimeout(onHome, 260)
+    if (key === 'history')     setTimeout(onHistory, 260)
+    if (key === 'settings')    setTimeout(onSettings, 260)
+    if (key === 'howitworks')  setTimeout(onHowItWorks, 260)
+    if (key === 'privacy')     setTimeout(onPrivacy, 260)
+    if (key === 'feedback')    setTimeout(onFeedback, 260)
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
+      <Pressable style={drawerSt.overlay} onPress={onClose}>
+        <Animated.View style={[drawerSt.drawer, { transform: [{ translateX: tx }] }]}>
+          <Pressable style={{ flex: 1 }} onPress={() => {}}>
+            <View style={[drawerSt.top, { paddingTop: insets.top + 4 }]}>
+              <UserAvatar imageUrl={user?.imageUrl} name={user?.fullName || user?.firstName} size={40} />
+              <View style={{ flex: 1 }}>
+                <Text style={drawerSt.appName}>Cricket Tosser</Text>
+                <Text style={drawerSt.tagline}>Read the pitch. Win the toss.</Text>
+              </View>
+              <TouchableOpacity style={drawerSt.closeBtn} onPress={onClose} activeOpacity={0.7}>
+                <Text style={drawerSt.closeX}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={drawerSt.nav} showsVerticalScrollIndicator={false}>
+              <Text style={drawerSt.group}>PRIMARY</Text>
+              {[
+                { label: 'New pitch report', key: 'home' },
+                { label: 'Report history',   key: 'history' },
+                { label: 'Settings',         key: 'settings' },
+              ].map(item => (
+                <TouchableOpacity
+                  key={item.label}
+                  style={[drawerSt.navRow, item.key === 'history' && drawerSt.navRowActive]}
+                  onPress={() => handleItem(item.key)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[drawerSt.navLabel, item.key === 'history' && drawerSt.navLabelActive]}>
+                    {item.label}
+                  </Text>
+                  {item.key === 'history'
+                    ? <View style={drawerSt.navDot} />
+                    : <Text style={drawerSt.navChev}>›</Text>
+                  }
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 16 }} />
+              <Text style={drawerSt.group}>SUPPORT</Text>
+              {[
+                { label: 'How it works',  key: 'howitworks' },
+                { label: 'Privacy',       key: 'privacy' },
+                { label: 'Send feedback', key: 'feedback' },
+              ].map(item => (
+                <TouchableOpacity key={item.label} style={drawerSt.navRow} onPress={() => handleItem(item.key)} activeOpacity={0.7}>
+                  <Text style={drawerSt.navLabel}>{item.label}</Text>
+                  <Text style={drawerSt.navChev}>›</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={[drawerSt.foot, { paddingBottom: Math.max(insets.bottom, 14) }]}>
+              <CoinMark outer={18} inner={16} />
+              <Text style={drawerSt.footText}>Cricket Tosser · v0.9</Text>
+            </View>
+          </Pressable>
+        </Animated.View>
+      </Pressable>
+    </Modal>
+  )
+}
+
+const drawerSt = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(16,64,32,0.42)',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  drawer: {
+    width: DRAWER_W,
+    height: '100%',
+    backgroundColor: '#FFFDF7',
+    borderTopLeftRadius: 26,
+    borderBottomLeftRadius: 26,
+    overflow: 'hidden',
+    shadowColor: '#101e14',
+    shadowOffset: { width: -20, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 25,
+    elevation: 20,
+  },
+  top: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#D8D4C5',
+  },
+  appName: { fontSize: 18, fontWeight: '800', color: '#104020' },
+  tagline: { fontSize: 12, fontWeight: '400', color: '#52624A', marginTop: 2 },
+  closeBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: 1, borderColor: '#D8D4C5',
+    backgroundColor: '#F7F2E8',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  closeX: { fontSize: 15, color: '#52624A', lineHeight: 19 },
+  nav: { padding: 14, paddingBottom: 20 },
+  group: {
+    fontSize: 11, fontWeight: '700', color: '#708040',
+    letterSpacing: 1.6, marginBottom: 4, marginLeft: 12, marginTop: 4,
+  },
+  navRow: {
+    height: 50, flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 12, borderRadius: 14, gap: 10,
+  },
+  navRowActive: { backgroundColor: '#e9f0df' },
+  navLabel: { flex: 1, fontSize: 14, fontWeight: '500', color: '#52624A' },
+  navLabelActive: { fontWeight: '600', color: '#104020' },
+  navDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#903020' },
+  navChev: { fontSize: 18, color: '#708040' },
+  foot: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 20, paddingTop: 14,
+    borderTopWidth: 1, borderTopColor: '#D8D4C5',
+  },
+  footText: { fontSize: 12, fontWeight: '500', color: '#9AA18C' },
+})
 
 const C = {
-  cream: '#F1EAD8',
-  dark: '#1A0E0C',
-  red: '#A8331F',
-  tan: '#C2A172',
-  mutedText: 'rgba(26,14,12,0.62)',
-  dimText: 'rgba(26,14,12,0.40)',
-  veryMuted: 'rgba(26,14,12,0.18)',
-  divider: 'rgba(26,14,12,0.10)',
-  white: '#FFFFFF',
-  cardFill: '#FFF8E8',
-  green: '#2E6B1F',
-  greenBg: '#DFF0D2',
+  cream:     '#F7F2E8',
+  dark:      '#104020',
+  red:       '#903020',
+  tan:       '#507020',
+  mutedText: '#52624A',
+  dimText:   'rgba(82,98,74,0.55)',
+  veryMuted: 'rgba(208,212,197,0.55)',
+  divider:   'rgba(208,212,197,0.60)',
+  white:     '#FFFDF7',
+  cardFill:  '#FFFDF7',
+  green:     '#507020',
+  greenBg:   '#E8F2DC',
+}
+
+interface ReviewSummary {
+  id: string
+  toss_report_completed?: boolean
+  match_won?: boolean | null
+  pitch_rating?: number | null
 }
 
 interface ReportRow {
@@ -38,7 +243,9 @@ interface ReportRow {
   created_at: string
   prediction: Record<string, unknown>
   weather: Record<string, unknown>
-  reviews: { id: string }[]
+  reviews: ReviewSummary[]
+  toss_completed?: boolean
+  match_completed?: boolean
 }
 
 type Props = NativeStackScreenProps<RootStackParamList, 'History'>
@@ -51,8 +258,10 @@ function formatDate(dateStr: string): string {
 export default function HistoryScreen({ navigation }: Props) {
   const { isSignedIn } = useAuth()
   const supabase = useSupabaseClient()
+  const { isOffline } = useContext(OfflineContext)
   const [reports, setReports] = useState<ReportRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   const loadReports = useCallback(async () => {
     setLoading(true)
@@ -67,7 +276,7 @@ export default function HistoryScreen({ navigation }: Props) {
         try {
           const { data } = await supabase
             .from('reports')
-            .select('id, ground_name, overs, match_date, created_at, prediction, weather, reviews(id)')
+            .select('id, ground_name, overs, match_date, created_at, prediction, weather, reviews(id, toss_report_completed, match_won, pitch_rating)')
             .order('created_at', { ascending: false })
             .limit(50)
 
@@ -112,26 +321,39 @@ export default function HistoryScreen({ navigation }: Props) {
     })
   }
 
-  const handleAddReview = (report: ReportRow) => {
-    navigation.navigate('Review', { reportId: report.id, groundName: report.ground_name })
+  const handleAddToss = (report: ReportRow) => {
+    track('history_stage_tapped', { stage: 'toss', report_id: report.id })
+    navigation.navigate('Report', {
+      result: { prediction: report.prediction, weather: report.weather },
+      groundName: report.ground_name,
+      overs: report.overs,
+      squad: null,
+      reportId: report.id.startsWith('local_') ? undefined : report.id,
+      scrollToToss: true,
+    })
+  }
+
+  const handleAddMatch = (report: ReportRow) => {
+    track('history_stage_tapped', { stage: 'match', report_id: report.id })
+    navigation.navigate('Report', {
+      result: { prediction: report.prediction, weather: report.weather },
+      groundName: report.ground_name,
+      overs: report.overs,
+      squad: null,
+      reportId: report.id.startsWith('local_') ? undefined : report.id,
+      scrollToMatch: true,
+    })
   }
 
   return (
     <SafeAreaView style={styles.root}>
-      {/* Header */}
-      <View style={styles.headerBar}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>MATCH HISTORY</Text>
-        <View style={{ width: 28 }} />
-      </View>
-      <View style={styles.headerDivider} />
+      <AppHeader
+        onLogoPress={isOffline ? () => navigation.goBack() : () => navigation.navigate('Home')}
+        onBurger={() => setDrawerOpen(true)}
+        hideBurger={isOffline}
+      />
 
-      {!isSignedIn && (
+      {!isSignedIn && !isOffline && (
         <TouchableOpacity style={styles.syncBanner} onPress={() => navigation.navigate('Auth')} activeOpacity={0.8}>
           <Text style={styles.syncBannerText}>Sign in to sync across devices →</Text>
         </TouchableOpacity>
@@ -146,7 +368,7 @@ export default function HistoryScreen({ navigation }: Props) {
           <Text style={styles.emptyIcon}>🏏</Text>
           <Text style={styles.emptyTitle}>No analyses yet</Text>
           <Text style={styles.emptySub}>Go read a pitch!</Text>
-          {!isSignedIn && (
+          {!isSignedIn && !isOffline && (
             <TouchableOpacity
               style={styles.signInBtn}
               onPress={() => navigation.navigate('Auth')}
@@ -160,9 +382,15 @@ export default function HistoryScreen({ navigation }: Props) {
         <ScrollView contentContainerStyle={styles.list}>
           {reports.map(report => {
             const toss = (report.prediction?.toss_decision as string) ?? ''
-            const hasReview = report.reviews?.length > 0
             const canReview = !report.id.startsWith('local_')
             const dateStr = report.match_date || report.created_at
+
+            const review = report.reviews?.[0]
+            const tossDone = review?.toss_report_completed === true || report.toss_completed === true
+            const matchDone = tossDone && (
+              (review?.match_won !== null && review?.match_won !== undefined) ||
+              report.match_completed === true
+            )
 
             return (
               <TouchableOpacity
@@ -195,18 +423,45 @@ export default function HistoryScreen({ navigation }: Props) {
                 <View style={styles.cardDivider} />
 
                 <View style={styles.cardBottom}>
-                  {hasReview ? (
-                    <View style={styles.reviewedBadge}>
-                      <Text style={styles.reviewedText}>Reviewed ✓</Text>
+                  {canReview ? (
+                    <View style={styles.stageBadgeRow}>
+                      {/* Stage 1: Toss */}
+                      {tossDone ? (
+                        <View style={styles.stageBadgeDone}>
+                          <Text style={styles.stageBadgeDoneText}>🪙 Toss ✓</Text>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          onPress={() => handleAddToss(report)}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.stageActionPill}>
+                            <Text style={styles.stageActionPillText}>🪙 Add toss result</Text>
+                          </View>
+                        </TouchableOpacity>
+                      )}
+                      {/* Stage 2: Match */}
+                      {matchDone ? (
+                        <View style={styles.stageBadgeDone}>
+                          <Text style={styles.stageBadgeDoneText}>📋 Match ✓</Text>
+                        </View>
+                      ) : tossDone ? (
+                        <TouchableOpacity
+                          onPress={() => handleAddMatch(report)}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.stageActionPill}>
+                            <Text style={styles.stageActionPillText}>📋 Add match result</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ) : (
+                        <View style={styles.stageBadgeLocked}>
+                          <Text style={styles.stageBadgeLockedText}>📋 Match</Text>
+                        </View>
+                      )}
                     </View>
-                  ) : canReview ? (
-                    <TouchableOpacity
-                      onPress={() => handleAddReview(report)}
-                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.addReviewText}>+ Add review</Text>
-                    </TouchableOpacity>
                   ) : (
                     <View />
                   )}
@@ -217,6 +472,18 @@ export default function HistoryScreen({ navigation }: Props) {
           })}
         </ScrollView>
       )}
+      {!isOffline && (
+        <BurgerDrawer
+          visible={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          onHome={() => navigation.navigate('Home')}
+          onHistory={() => setDrawerOpen(false)}
+          onSettings={() => navigation.navigate('Settings')}
+          onHowItWorks={() => navigation.navigate('HowItWorks')}
+          onPrivacy={() => navigation.navigate('Privacy')}
+          onFeedback={() => navigation.navigate('Feedback')}
+        />
+      )}
     </SafeAreaView>
   )
 }
@@ -224,28 +491,12 @@ export default function HistoryScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.cream },
 
-  headerBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  backText: { fontSize: 22, color: C.dark, lineHeight: 28 },
-  headerTitle: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2.2,
-    color: C.tan,
-  },
-  headerDivider: { height: 1, backgroundColor: C.divider },
-
   syncBanner: {
-    backgroundColor: '#FFF3CD',
+    backgroundColor: '#FFF8E7',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0C14B',
+    borderBottomColor: '#F0AD4E',
   },
   syncBannerText: {
     fontSize: 12,
@@ -279,7 +530,7 @@ const styles = StyleSheet.create({
     backgroundColor: C.dark,
     paddingVertical: 14,
     paddingHorizontal: 40,
-    borderRadius: 12,
+    borderRadius: 16,
     marginTop: 12,
   },
   signInBtnText: { color: C.white, fontSize: 16, fontWeight: '600' },
@@ -288,7 +539,7 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: C.cardFill,
-    borderRadius: 12,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: C.divider,
     padding: 14,
@@ -315,7 +566,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   tossBat: { backgroundColor: C.greenBg },
-  tossBowl: { backgroundColor: '#FDE8E8' },
+  tossBowl: { backgroundColor: '#EEE8F2' },
   tossBadgeText: {
     fontSize: 12,
     fontWeight: '700',
@@ -328,13 +579,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  reviewedBadge: {
-    backgroundColor: C.greenBg,
-    borderRadius: 20,
+  stageBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  stageBadgeDone: {
+    backgroundColor: '#E8F2DC',
+    borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
-  reviewedText: { fontSize: 11, fontWeight: '600', color: C.green },
-  addReviewText: { fontSize: 12, color: C.red, fontWeight: '500' },
+  stageBadgeDoneText: { fontSize: 11, fontWeight: '700', color: '#104020' },
+  stageActionPill: {
+    borderWidth: 1,
+    borderColor: C.red,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  stageActionPillText: {
+    fontSize: 11,
+    color: C.red,
+    fontWeight: '600',
+  },
+  stageBadgeLocked: {
+    backgroundColor: 'rgba(208,212,197,0.35)',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  stageBadgeLockedText: {
+    fontSize: 11,
+    color: C.dimText,
+    fontWeight: '600',
+  },
   cardChevron: { fontSize: 18, color: C.mutedText },
 })

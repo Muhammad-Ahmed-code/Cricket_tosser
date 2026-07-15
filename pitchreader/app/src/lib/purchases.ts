@@ -2,17 +2,25 @@ import Purchases, { LOG_LEVEL } from 'react-native-purchases'
 import { Platform } from 'react-native'
 
 const API_KEYS = {
-  ios: 'test_dQNPbMKWefaZWdETmUFdYBXxDew',
-  android: 'test_dQNPbMKWefaZWdETmUFdYBXxDew',
+  ios: process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY!,
+  android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY!,
 }
 
 const ENTITLEMENT_ID = 'premium'
 const YEARLY_PRODUCT_ID = 'pitchreader_yearly_399'
 
 export function configurePurchases(): void {
-  Purchases.setLogLevel(LOG_LEVEL.ERROR)
-  const apiKey = Platform.OS === 'ios' ? API_KEYS.ios : API_KEYS.android
-  Purchases.configure({ apiKey })
+  try {
+    Purchases.setLogLevel(LOG_LEVEL.ERROR)
+    const apiKey = Platform.OS === 'ios' ? API_KEYS.ios : API_KEYS.android
+    if (!apiKey) {
+      console.warn('RevenueCat API key is missing — purchases disabled')
+      return
+    }
+    Purchases.configure({ apiKey })
+  } catch (e) {
+    console.warn('RevenueCat configure failed:', e)
+  }
 }
 
 export async function checkSubscriptionStatus(): Promise<boolean> {

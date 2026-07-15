@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -7,60 +7,95 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  TextInput,
+  KeyboardAvoidingView,
+  ScrollView,
+  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '@clerk/clerk-expo'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '../../App'
 import { usePurchases } from '../lib/usePurchases'
+import { usageStore } from '../lib/usageStore'
+import { track } from '../lib/analytics'
 
 const C = {
-  cream: '#F1EAD8',
-  dark: '#1A0E0C',
-  red: '#A8331F',
-  tan: '#C2A172',
-  mutedText: 'rgba(26,14,12,0.62)',
-  dimText: 'rgba(26,14,12,0.40)',
-  veryMuted: 'rgba(26,14,12,0.18)',
-  cardFill: '#FFF8E8',
-  divider: 'rgba(26,14,12,0.10)',
-  white: '#FFFFFF',
-  green: '#2E6B1F',
-  greenBg: '#DFF0D2',
+  cream:     '#F7F2E8',
+  dark:      '#104020',
+  red:       '#903020',
+  tan:       '#507020',
+  mutedText: '#52624A',
+  dimText:   'rgba(82,98,74,0.55)',
+  veryMuted: 'rgba(208,212,197,0.55)',
+  cardFill:  '#FFFDF7',
+  divider:   'rgba(208,212,197,0.60)',
+  white:     '#FFFDF7',
+  green:     '#507020',
+  greenBg:   '#E8F2DC',
 }
 
 const FEATURES = [
   'Unlimited match reports',
   'Live weather analysis',
-  'AI squad recommendations',
+  'Cricket Tosser squad recommendations',
 ]
+
+const COPY = {
+  limit_reached: {
+    title: "You've used your 3 free reports",
+    subtitle: "Upgrade to Cricket Tosser Pro to keep analysing pitches all season.",
+  },
+  voluntary: {
+    title: "Upgrade to Cricket Tosser Pro",
+    subtitle: "Unlimited pitch reports, all season long. Never miss a toss.",
+  },
+  restore: {
+    title: "Welcome back",
+    subtitle: "Restore your Pro subscription below.",
+  },
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Paywall'>
 
-export default function PaywallScreen({ navigation }: Props) {
+export default function PaywallScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(false)
+  const [promoCode, setPromoCode] = useState('')
+  const [promoStatus, setPromoStatus] = useState<'idle' | 'applied' | 'invalid' | 'already_applied'>('idle')
+  const scrollViewRef = useRef<ScrollView>(null)
   const { isSignedIn } = useAuth()
   const { purchaseYearlyPlan, restorePurchases } = usePurchases()
+
+  const trigger = route.params?.trigger ?? 'voluntary'
+  const copy = COPY[trigger]
+
+  useEffect(() => {
+    track('paywall_shown', { reports_used: usageStore.getReportCount(), trigger })
+  }, [])
+
+  const handleApplyPromo = () => {
+    if (promoStatus === 'applied') {
+      setPromoStatus('already_applied')
+      return
+    }
+    if (promoCode.trim().toUpperCase() === 'HITFORSIX') {
+      setPromoStatus('applied')
+      setPromoCode('')
+    } else {
+      setPromoStatus('invalid')
+    }
+  }
 
   const handlePurchase = async () => {
     setLoading(true)
     try {
+      // NOTE: when promoStatus === 'applied', this should use the $6.99 discounted
+      // RevenueCat package/offering if one exists. Map promoStatus here once the
+      // discounted offering is configured in RevenueCat.
       const success = await purchaseYearlyPlan()
       if (success) {
-        if (!isSignedIn) {
-          // Anonymous purchase — nudge them to create an account so it follows them
-          Alert.alert(
-            'Keep your subscription across devices',
-            'Create an account to access your subscription on any device.',
-            [
-              { text: 'Maybe later', style: 'cancel', onPress: () => navigation.replace('Home') },
-              { text: 'Create account', onPress: () => navigation.replace('Auth') },
-            ]
-          )
-        } else {
-          navigation.replace('Home')
-          Alert.alert("You're all set!", 'Enjoy unlimited reports.')
-        }
+        navigation.replace('Home')
+        Alert.alert("You're all set!", 'Enjoy unlimited reports.')
       }
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'userCancelled' in err && (err as { userCancelled: boolean }).userCancelled) {
@@ -74,18 +109,6 @@ export default function PaywallScreen({ navigation }: Props) {
   }
 
   const handleRestore = async () => {
-    if (!isSignedIn) {
-      Alert.alert(
-        'Sign in first',
-        'Sign in so we can find and restore your subscription across devices.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Sign in', onPress: () => navigation.replace('Auth') },
-        ]
-      )
-      return
-    }
-
     setLoading(true)
     try {
       const success = await restorePurchases()
@@ -106,6 +129,54 @@ export default function PaywallScreen({ navigation }: Props) {
     }
   }
 
+  // Auth gate — anonymous users must sign in before any purchase UI is shown
+  if (!isSignedIn) {
+    return (
+      <SafeAreaView style={styles.root}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          activeOpacity={0.7}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.backBtnText}>← Back</Text>
+        </TouchableOpacity>
+
+        <View style={styles.authGate}>
+          <View style={styles.iconWrap}>
+            <Image
+              source={require('../../assets/coin-emblem.png')}
+              style={styles.ballIcon}
+              resizeMode="cover"
+            />
+          </View>
+
+          <Text style={styles.authGateTitle}>Create a free account first</Text>
+          <Text style={styles.authGateBody}>
+            Sign in to Cricket Tosser before upgrading — this links your subscription to your
+            account so it's never lost and works across all your devices.
+          </Text>
+
+          <TouchableOpacity
+            style={styles.ctaBtn}
+            onPress={() => navigation.navigate('Auth')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.ctaBtnText}>Sign in</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.restoreBtn}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.restoreBtnText}>Maybe later</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
   return (
     <SafeAreaView style={styles.root}>
       <TouchableOpacity
@@ -118,19 +189,28 @@ export default function PaywallScreen({ navigation }: Props) {
         <Text style={styles.backBtnText}>← Back</Text>
       </TouchableOpacity>
 
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+
       <View style={styles.content}>
         <View style={styles.iconWrap}>
           <Image
-            source={require('../../assets/cricket-ball.png')}
+            source={require('../../assets/coin-emblem.png')}
             style={styles.ballIcon}
             resizeMode="cover"
           />
         </View>
 
-        <Text style={styles.headline}>{"You've used your\n3 free reports"}</Text>
-        <Text style={styles.subheadline}>
-          {"Unlock unlimited pitch analysis\nfor the whole season"}
-        </Text>
+        <Text style={styles.headline}>{copy.title}</Text>
+        <Text style={styles.subheadline}>{copy.subtitle}</Text>
 
         <View style={styles.featureList}>
           {FEATURES.map((feature, i) => (
@@ -147,6 +227,56 @@ export default function PaywallScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.actions}>
+        {/* Promo code */}
+        <View style={styles.promoSection}>
+          <Text style={styles.promoLabel}>Have a promo code?</Text>
+          <View style={styles.promoRow}>
+            <TextInput
+              style={styles.promoInput}
+              value={promoCode}
+              onChangeText={text => {
+                setPromoCode(text)
+                if (promoStatus === 'invalid' || promoStatus === 'already_applied') {
+                  setPromoStatus('idle')
+                }
+              }}
+              placeholder="Enter code e.g. HITFORSIX"
+              placeholderTextColor={C.dimText}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              editable={promoStatus !== 'applied'}
+              onFocus={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+            />
+            <TouchableOpacity
+              style={[styles.promoApplyBtn, promoStatus === 'applied' && styles.promoApplyBtnDisabled]}
+              onPress={handleApplyPromo}
+              activeOpacity={0.8}
+              disabled={promoStatus === 'applied'}
+            >
+              <Text style={styles.promoApplyBtnText}>Apply</Text>
+            </TouchableOpacity>
+          </View>
+          {promoStatus === 'invalid' && (
+            <Text style={styles.promoError}>Invalid promo code</Text>
+          )}
+          {promoStatus === 'already_applied' && (
+            <Text style={styles.promoSuccess}>Code already applied ✓</Text>
+          )}
+          {promoStatus === 'applied' && (
+            <Text style={styles.promoSuccess}>Promo applied 🏏</Text>
+          )}
+        </View>
+
+        {/* Price display */}
+        <View style={styles.priceRow}>
+          {promoStatus === 'applied' ? (
+            <>
+              <Text style={styles.priceStrike}>£9.99/year</Text>
+              <Text style={styles.priceDiscounted}> £6.99/year</Text>
+            </>
+          ) : null}
+        </View>
+
         <TouchableOpacity
           style={[styles.ctaBtn, loading && styles.ctaBtnDisabled]}
           onPress={handlePurchase}
@@ -156,7 +286,9 @@ export default function PaywallScreen({ navigation }: Props) {
           {loading ? (
             <ActivityIndicator color={C.white} />
           ) : (
-            <Text style={styles.ctaBtnText}>Start for £3.99 / year</Text>
+            <Text style={styles.ctaBtnText}>
+              {promoStatus === 'applied' ? 'Start for £6.99 / year' : 'Start for £9.99 / year'}
+            </Text>
           )}
         </TouchableOpacity>
 
@@ -173,19 +305,47 @@ export default function PaywallScreen({ navigation }: Props) {
           Billed annually. Cancel anytime via App Store or Google Play.
         </Text>
       </View>
+
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.cream },
+  scrollContent: { flexGrow: 1 },
 
   backBtn: {
     paddingHorizontal: 16,
     paddingTop: 4,
     paddingBottom: 8,
   },
-  backBtnText: { fontSize: 14, color: C.red, fontWeight: '600' },
+  backBtnText: { fontSize: 14, color: C.dark, fontWeight: '600' },
+
+  authGate: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+    paddingBottom: 40,
+  },
+  authGateTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: C.dark,
+    textAlign: 'center',
+    lineHeight: 32,
+    marginBottom: 12,
+    letterSpacing: -0.4,
+  },
+  authGateBody: {
+    fontSize: 14,
+    color: C.mutedText,
+    lineHeight: 21,
+    textAlign: 'center',
+    marginBottom: 32,
+  },
 
   content: {
     flex: 1,
@@ -209,7 +369,7 @@ const styles = StyleSheet.create({
   ballIcon: { width: 80, height: 80, borderRadius: 40 },
 
   headline: {
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: '800',
     color: C.dark,
     textAlign: 'center',
@@ -227,7 +387,7 @@ const styles = StyleSheet.create({
   featureList: {
     alignSelf: 'stretch',
     backgroundColor: C.cardFill,
-    borderRadius: 14,
+    borderRadius: 20,
     padding: 20,
     borderWidth: 1,
     borderColor: C.divider,
@@ -259,9 +419,77 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+
+  promoSection: {
+    alignSelf: 'stretch',
+    gap: 6,
+  },
+  promoLabel: {
+    fontSize: 12,
+    color: C.mutedText,
+    fontWeight: '500',
+  },
+  promoRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  promoInput: {
+    flex: 1,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.divider,
+    backgroundColor: C.cardFill,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    color: C.dark,
+    letterSpacing: 0.5,
+  },
+  promoApplyBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: C.dark,
+  },
+  promoApplyBtnDisabled: {
+    opacity: 0.4,
+  },
+  promoApplyBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.white,
+  },
+  promoError: {
+    fontSize: 12,
+    color: C.red,
+    fontWeight: '500',
+  },
+  promoSuccess: {
+    fontSize: 12,
+    color: C.green,
+    fontWeight: '600',
+  },
+
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 18,
+  },
+  priceStrike: {
+    fontSize: 14,
+    color: C.dimText,
+    textDecorationLine: 'line-through',
+  },
+  priceDiscounted: {
+    fontSize: 15,
+    color: C.green,
+    fontWeight: '700',
+  },
+
   ctaBtn: {
     backgroundColor: C.red,
-    borderRadius: 14,
+    borderRadius: 16,
     paddingVertical: 18,
     alignSelf: 'stretch',
     alignItems: 'center',
@@ -269,10 +497,10 @@ const styles = StyleSheet.create({
     minHeight: 58,
   },
   ctaBtnDisabled: { opacity: 0.65 },
-  ctaBtnText: { color: C.white, fontSize: 17, fontWeight: '700', letterSpacing: 0.2 },
+  ctaBtnText: { color: C.white, fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
 
   restoreBtn: { paddingVertical: 8 },
-  restoreBtnText: { fontSize: 13, color: C.red, fontWeight: '500' },
+  restoreBtnText: { fontSize: 13, color: C.mutedText, fontWeight: '500' },
 
   legal: {
     fontSize: 10,

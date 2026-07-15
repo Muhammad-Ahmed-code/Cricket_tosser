@@ -68,8 +68,42 @@ pitch.jpg + lat/lng
 
 ### How to run
 
+#### Standalone pipeline (Node scripts)
+
 ```bash
 node pitchreader/analyse.js
 ```
 
 Requires `pitch.jpg` in the `pitchreader/` folder and `ANTHROPIC_API_KEY` set in `pitchreader/.env`.
+
+---
+
+#### Mobile app (Expo / React Native)
+
+**Prerequisites**
+
+- Node.js 18+
+- [Expo CLI](https://docs.expo.dev/get-started/installation/) — `npm install -g expo-cli`
+- iOS: Xcode + Simulator, or the [Expo Go](https://expo.dev/client) app on a physical device
+- Android: Android Studio + emulator, or the Expo Go app on a physical device
+
+**Steps**
+
+```bash
+# 1. Install dependencies
+cd pitchreader/app
+npm install
+
+# 2. Start the dev server
+npm start
+```
+
+Then press `i` to open in an iOS simulator, `a` for Android, or scan the QR code with the Expo Go app.
+
+**Run on a specific platform**
+
+```bash
+npm run ios       # iOS simulator
+npm run android   # Android emulator
+npm run web       # Browser
+```

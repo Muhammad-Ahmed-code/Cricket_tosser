@@ -39,9 +39,9 @@ export default function SquadInput() {
   }
 
   const totalColor =
-    total === 11 ? '#2d5a27' :
-    total > 0 ? '#b35a00' :
-    '#9a8a70'
+    total === 11 ? '#507020' :
+    total > 0 ? '#903020' :
+    '#52624A'
 
   const renderCounter = ({ key, label, sub }: CounterDef) => (
     <View key={key} style={styles.counterRow}>
@@ -103,13 +103,13 @@ export default function SquadInput() {
                     Total: {total} players
                   </Text>
                   {total < 10 && (
-                    <Text style={[styles.statusMsg, { color: '#b35a00' }]}>Need at least 10</Text>
+                    <Text style={[styles.statusMsg, { color: '#903020' }]}>Need at least 10</Text>
                   )}
                   {total === 11 && (
-                    <Text style={[styles.statusMsg, { color: '#2d5a27' }]}>Perfect XI ✓</Text>
+                    <Text style={[styles.statusMsg, { color: '#507020' }]}>Perfect XI ✓</Text>
                   )}
                   {total > 11 && (
-                    <Text style={[styles.statusMsg, { color: '#b35a00' }]}>That's {total} — a full XI is 11</Text>
+                    <Text style={[styles.statusMsg, { color: '#903020' }]}>That's {total} — a full XI is 11</Text>
                   )}
                 </View>
                 <TouchableOpacity onPress={clear} activeOpacity={0.7}>
@@ -141,25 +141,25 @@ const styles = StyleSheet.create({
   headerText: {
     fontSize: 13,
     fontWeight: '500',
-    color: '#6b5a3e',
+    color: '#52624A',
   },
   optionalPill: {
-    backgroundColor: '#e8e0d0',
+    backgroundColor: '#F7F2E8',
     borderRadius: 20,
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
   optionalText: {
     fontSize: 10,
-    color: '#9a8a70',
+    color: '#52624A',
   },
   chevron: {
     fontSize: 16,
-    color: '#9a8a70',
+    color: '#52624A',
   },
   hint: {
     fontSize: 11,
-    color: '#9a8a70',
+    color: '#52624A',
     marginTop: 4,
   },
   body: {
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
   },
   groupLabel: {
     fontSize: 9,
-    color: '#9a8a70',
+    color: '#52624A',
     letterSpacing: 2,
     textTransform: 'uppercase',
     marginBottom: 6,
@@ -179,10 +179,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#ffffff',
-    borderRadius: 10,
+    backgroundColor: '#FFFDF7',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#d4c9b0',
+    borderColor: '#D8D4C5',
     paddingVertical: 10,
     paddingHorizontal: 14,
     marginBottom: 8,
@@ -193,11 +193,11 @@ const styles = StyleSheet.create({
   counterLabel: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#1a3a1a',
+    color: '#14351F',
   },
   counterSub: {
     fontSize: 11,
-    color: '#9a8a70',
+    color: '#52624A',
     marginTop: 1,
   },
   counterControls: {
@@ -209,19 +209,19 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#e8e0d0',
+    backgroundColor: '#F7F2E8',
     alignItems: 'center',
     justifyContent: 'center',
   },
   counterBtnText: {
     fontSize: 16,
-    color: '#1a3a1a',
+    color: '#14351F',
     lineHeight: 20,
   },
   counterNum: {
     fontSize: 24,
     fontWeight: '500',
-    color: '#1a3a1a',
+    color: '#14351F',
     width: 28,
     textAlign: 'center',
   },
@@ -230,7 +230,7 @@ const styles = StyleSheet.create({
   },
   summaryLine: {
     fontSize: 11,
-    color: '#6b5a3e',
+    color: '#52624A',
     marginBottom: 8,
     paddingHorizontal: 2,
   },
@@ -250,6 +250,6 @@ const styles = StyleSheet.create({
   },
   clearLink: {
     fontSize: 12,
-    color: '#9a8a70',
+    color: '#52624A',
   },
 })

@@ -1,9 +1,8 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Animated,
   Dimensions,
   Easing,
-  Image,
   Platform,
   StatusBar,
   StyleSheet,
@@ -11,258 +10,311 @@ import {
   View,
 } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import Svg, {
+  Circle,
+  Defs,
+  Filter,
+  FeTurbulence,
+  FeColorMatrix,
+  Rect,
+} from 'react-native-svg'
+import {
+  useFonts,
+  BricolageGrotesque_400Regular,
+  BricolageGrotesque_700Bold,
+} from '@expo-google-fonts/bricolage-grotesque'
+import {
+  JetBrainsMono_400Regular,
+  JetBrainsMono_700Bold,
+} from '@expo-google-fonts/jetbrains-mono'
+import Coin from '../components/Coin'
 
-const { width: W, height: H } = Dimensions.get('screen')
+const { width: SCREEN_WIDTH } = Dimensions.get('window')
+const cricketFontSize = Math.min(70, SCREEN_WIDTH * 0.172)
+const tosserFontSize  = Math.min(48, SCREEN_WIDTH * 0.118)
 
-const C = {
-  bg:      '#07030A',
-  glow:    '#2A1410',
-  cream:   '#F5EAD0',
-  red:     '#D94B3A',
-  c55:     'rgba(245,234,208,0.55)',
-  c70:     'rgba(245,234,208,0.70)',
-  c15:     'rgba(245,234,208,0.15)',
-  c08:     'rgba(245,234,208,0.08)',
+const LOAD_MS = 3400
+
+const T = {
+  bg:       '#f1ead8',
+  spot:     '#fff5dd',
+  ink:      '#1a0e0c',
+  inkSoft:  'rgba(26,14,12,0.62)',
+  inkLow:   'rgba(26,14,12,0.42)',
+  inkFaint: 'rgba(26,14,12,0.16)',
+  oxblood:  '#a8331f',
 }
-
-// Ball positioning extracted from the HTML design (reference: 390×844)
-// Container: top 354, left 130, size 320. Image overflows -38.39 on all sides → 396.78px
-// Effective screen position: top 315.61, left 91.61, size 396.781
-// Rotation: matrix(0.951, -0.309, 0.309, 0.951) = 18° around image centre
-const BALL_SIZE = W * (396.781 / 390)
-const BALL_TOP  = H * (315.61 / 844)
-const BALL_LEFT = W * (91.61 / 390)
 
 interface Props {
   onFinish: () => void
+  onReady?: () => void
 }
 
-export default function SplashScreenView({ onFinish }: Props) {
-  const fade     = useRef(new Animated.Value(1)).current
-  const progress = useRef(new Animated.Value(0)).current
-  const insets   = useSafeAreaInsets()
-
-  const progressWidth = progress.interpolate({
-    inputRange:  [0, 1],
-    outputRange: [0, W],
+export default function SplashScreenView({ onFinish, onReady }: Props) {
+  const [fontsLoaded] = useFonts({
+    BricolageGrotesque_400Regular,
+    BricolageGrotesque_700Bold,
+    JetBrainsMono_400Regular,
+    JetBrainsMono_700Bold,
   })
 
   useEffect(() => {
-    Animated.sequence([
-      // Progress bar fills over exactly 2.5 s (linear, JS driver — width not native-animatable)
-      Animated.timing(progress, {
-        toValue: 1,
-        duration: 2500,
-        easing: Easing.linear,
-        useNativeDriver: false,
-      }),
-      // Fade the whole screen out once the bar reaches the end
-      Animated.timing(fade, {
-        toValue: 0,
-        duration: 450,
-        useNativeDriver: true,
-      }),
-    ]).start(() => onFinish())
+    if (fontsLoaded) onReady?.()
+  }, [fontsLoaded])
+
+  const [pct, setPct] = useState(0)
+
+  // Entrance
+  const metaOpacity    = useRef(new Animated.Value(0)).current
+  const metaTransY     = useRef(new Animated.Value(-8)).current
+  const ruleOpacity    = useRef(new Animated.Value(0)).current
+  const wordOpacity    = useRef(new Animated.Value(0)).current
+  const wordTransY     = useRef(new Animated.Value(14)).current
+  const loaderOpacity  = useRef(new Animated.Value(0)).current
+  const loaderTransY   = useRef(new Animated.Value(14)).current
+
+  // Post-landing reveal
+  const haloOpacity    = useRef(new Animated.Value(0)).current
+
+  // Full-screen fade-out
+  const screenOpacity  = useRef(new Animated.Value(1)).current
+
+  // Loader dot blink
+  const dotOpacity     = useRef(new Animated.Value(1)).current
+
+  // Progress bar — JS driver (width% can't use native driver)
+  const progressAnim   = useRef(new Animated.Value(0)).current
+  const progressWidth  = progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] })
+
+  useEffect(() => {
+    // Loader dot blink: 1.4s ease-in-out infinite
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(dotOpacity, { toValue: 0.2, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(dotOpacity, { toValue: 1,   duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    ).start()
+
+    // entered at 40ms: staggered fade + slide for meta (0ms), wordmark (150ms), loader (300ms)
+    const tEnter = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(metaOpacity,   { toValue: 1, duration: 600, easing: Easing.ease, useNativeDriver: true }),
+        Animated.timing(metaTransY,    { toValue: 0, duration: 600, easing: Easing.ease, useNativeDriver: true }),
+        Animated.timing(ruleOpacity,   { toValue: 1, duration: 600, delay: 50,  easing: Easing.ease, useNativeDriver: true }),
+        Animated.timing(wordOpacity,   { toValue: 1, duration: 700, delay: 150, easing: Easing.ease, useNativeDriver: true }),
+        Animated.timing(wordTransY,    { toValue: 0, duration: 700, delay: 150, easing: Easing.ease, useNativeDriver: true }),
+        Animated.timing(loaderOpacity, { toValue: 1, duration: 700, delay: 300, easing: Easing.ease, useNativeDriver: true }),
+        Animated.timing(loaderTransY,  { toValue: 0, duration: 700, delay: 300, easing: Easing.ease, useNativeDriver: true }),
+      ]).start()
+    }, 40)
+
+    // Loader ramp: +1% every LOAD_MS/100 ms
+    const stepMs = LOAD_MS / 100
+    let count = 0
+    const iv = setInterval(() => {
+      count = Math.min(100, count + 1)
+      setPct(count)
+      if (count >= 100) clearInterval(iv)
+    }, stepMs)
+
+    return () => {
+      clearTimeout(tEnter)
+      clearInterval(iv)
+    }
   }, [])
 
-  const topPad = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) : 20)
+  // Progress bar width (JS driver, smooth 80ms transitions)
+  useEffect(() => {
+    Animated.timing(progressAnim, {
+      toValue: pct, duration: 80, easing: Easing.linear, useNativeDriver: false,
+    }).start()
+  }, [pct])
+
+  // pct=100 → +280ms fade out, +820ms navigate
+  useEffect(() => {
+    if (pct < 100) return
+    const tFade = setTimeout(() => {
+      Animated.timing(screenOpacity, {
+        toValue: 0, duration: 500, easing: Easing.ease, useNativeDriver: true,
+      }).start()
+    }, 280)
+    const tNav = setTimeout(onFinish, 820)
+    return () => { clearTimeout(tFade); clearTimeout(tNav) }
+  }, [pct])
+
+  const handleLanded = () => {
+    Animated.timing(haloOpacity, { toValue: 1, duration: 700, easing: Easing.ease, useNativeDriver: true }).start()
+  }
+
+  if (!fontsLoaded) return <View style={styles.wait} />
 
   return (
-    <Animated.View style={[styles.root, { opacity: fade }]}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+    <Animated.View style={[styles.root, { opacity: screenOpacity }]}>
+      <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
-      {/* Radial glow — dark maroon ellipse behind the ball */}
-      <View style={styles.glow} />
-
-      {/* Vertical divider line */}
-      <View style={[styles.vline, { left: W * 0.42 }]} />
-
-      {/* ── TOP BAR ── */}
-      <View style={[styles.topBar, { top: topPad + 8 }]}>
-        <Text style={styles.labelSmall}>EST · 2026 / VOL.01</Text>
-        <View style={styles.liveRow}>
-          <View style={styles.liveDot} />
-          <Text style={styles.liveText}>LIVE</Text>
-        </View>
-      </View>
-
-      {/* ── TITLE BLOCK ── */}
-      <View style={[styles.titleBlock, { top: topPad + 52 }]}>
-        <Text style={styles.titleMain}>Cricket</Text>
-        <Text style={styles.titleAccent}>Tosser</Text>
-        <Text style={styles.subtitle}>
-          Read the pitch before{'\n'}the bowler does.
-        </Text>
-      </View>
-
-      {/* ── CRICKET BALL ── exact position/size/rotation from HTML */}
-      <Image
-        source={require('../../assets/cinematic-ball.png')}
-        style={[
-          styles.ball,
-          {
-            width:  BALL_SIZE,
-            height: BALL_SIZE,
-            top:    BALL_TOP,
-            left:   BALL_LEFT,
-            transform: [{ rotate: '18deg' }],
-          },
-        ]}
-        resizeMode="contain"
+      {/* Background: linear approximation of radial-gradient(ellipse 80% 46% at 50% 40%) */}
+      <LinearGradient
+        colors={[T.spot, T.bg, '#e8e0cb']}
+        locations={[0, 0.58, 1]}
+        style={StyleSheet.absoluteFill}
       />
 
-      {/* ── BOTTOM DATA BAR ── */}
-      <View style={[styles.dataBar, { paddingBottom: Math.max(insets.bottom, 12) + 10 }]}>
-        {/* top separator */}
-        <View style={styles.sep} />
-        <View style={styles.dataRow}>
-          <Text style={styles.dataLabel}>SEAM · 73°</Text>
-          <Text style={styles.dataLabel}>HARDNESS · 8.2</Text>
-          <Text style={styles.dataLabel}>SPIN · LOW</Text>
+      {/* Paper grain — decorative, no-op on platforms that don't support SVG filters */}
+      <Svg
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0.3 }}
+        preserveAspectRatio="none"
+      >
+        <Defs>
+          <Filter id="splashgrain">
+            <FeTurbulence type="fractalNoise" baseFrequency="1.2" numOctaves="2" seed="7" />
+            <FeColorMatrix values="0 0 0 0 0.45  0 0 0 0 0.32  0 0 0 0 0.18  0 0 0 0.16 0" />
+          </Filter>
+        </Defs>
+        <Rect width="100%" height="100%" filter="url(#splashgrain)" />
+      </Svg>
+
+      {/* ── Masthead meta row — top 78, inset 28 ── */}
+      <Animated.View style={[styles.masthead, { opacity: metaOpacity, transform: [{ translateY: metaTransY }] }]}>
+        <Text style={[styles.metaText, { color: T.oxblood }]}>EST · 2026</Text>
+        <Text style={[styles.metaText, { color: T.inkLow }]}>Pitch Oracle</Text>
+        <Text style={[styles.metaText, { color: T.oxblood }]}>{'№'} 001</Text>
+      </Animated.View>
+
+      {/* Hairline rule at top 102 */}
+      <Animated.View style={[styles.hairline, { opacity: ruleOpacity }]} />
+
+      {/* ── Hero: 240×240 centered box at top 196 ── */}
+      <View style={styles.heroOuter}>
+        <View style={styles.heroInner}>
+
+          {/* Halo rings — fade in after coin lands */}
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity: haloOpacity }]}>
+            <Svg width={240} height={240} viewBox="0 0 240 240">
+              <Circle cx="120" cy="120" r="118" fill="none" stroke={T.inkFaint} strokeWidth="1" />
+              <Circle cx="120" cy="120" r="100" fill="none"
+                stroke="rgba(168,51,31,0.18)" strokeWidth="1" strokeDasharray="2 6" />
+            </Svg>
+          </Animated.View>
+
+          {/* Coin: 206px centered in 240px box → offset (240-206)/2 = 17 */}
+          <View style={styles.coinPos}>
+            <Coin size={206} onLanded={handleLanded} />
+          </View>
+
         </View>
-        {/* progress line — animates 0 → full width, red → white gradient */}
-        <Animated.View style={[styles.progressLine, { width: progressWidth }]}>
-          <LinearGradient
-            colors={['#cc2200', '#ff4422', '#ffffff']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </Animated.View>
       </View>
+
+      {/* ── Wordmark + tagline at top 472 ── */}
+      <Animated.View style={[styles.wordmark, { opacity: wordOpacity, transform: [{ translateY: wordTransY }] }]}>
+        <Text style={styles.wordmarkCricket}>Cricket</Text>
+        <Text style={styles.wordmarkTosser}>Tosser</Text>
+        <Text style={styles.tagline}>Read the pitch before the bowler does.</Text>
+      </Animated.View>
+
+      {/* ── Loader at bottom 88 ── */}
+      <Animated.View style={[styles.loader, { opacity: loaderOpacity, transform: [{ translateY: loaderTransY }] }]}>
+        <View style={styles.loaderHeader}>
+          <View style={styles.loaderLabelRow}>
+            <Animated.View style={[styles.loaderDot, { opacity: dotOpacity }]} />
+            <Text style={styles.loaderLabel}>Reading the pitch</Text>
+          </View>
+          <Text style={styles.loaderPct}>{pct}%</Text>
+        </View>
+        <View style={styles.loaderTrack}>
+          <Animated.View style={[styles.loaderFill, { width: progressWidth }]}>
+            <LinearGradient
+              colors={[T.oxblood, '#d97a4a']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+        </View>
+      </Animated.View>
     </Animated.View>
   )
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: C.bg,
-    overflow: 'hidden',
-  },
+  wait: { flex: 1, backgroundColor: '#f1ead8' },
+  root: { flex: 1, overflow: 'hidden' },
 
-  glow: {
-    position: 'absolute',
-    width:  W * 0.75,
-    height: H * 0.55,
-    borderRadius: W * 0.375,
-    backgroundColor: C.glow,
-    opacity: 0.45,
-    top:  H * 0.30,
-    left: W * 0.12,
-  },
-
-  vline: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: C.c15,
-  },
-
-  // ── top bar ──────────────────────────────────────────────────────────────
-  topBar: {
-    position: 'absolute',
-    left: 28,
-    right: 28,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    zIndex: 20,
-  },
-  labelSmall: {
-    color: C.c55,
-    fontSize: 10,
-    fontWeight: '400',
-    letterSpacing: 3.08,
-    textTransform: 'uppercase',
-  },
-  liveRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: C.red,
-  },
-  liveText: {
-    color: C.red,
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 3.08,
-    textTransform: 'uppercase',
-  },
-
-  // ── title ─────────────────────────────────────────────────────────────────
-  titleBlock: {
-    position: 'absolute',
-    left: 28,
-    zIndex: 20,
-  },
-  titleMain: {
-    color: C.cream,
-    fontSize: 56,
-    fontWeight: '800',
-    letterSpacing: -2.24,
-    lineHeight: 62,
-  },
-  titleAccent: {
-    color: C.red,
-    fontSize: 56,
-    fontWeight: '700',
-    fontStyle: 'italic',
-    letterSpacing: -2.24,
-    lineHeight: 62,
-  },
-  subtitle: {
-    color: C.c70,
-    fontSize: 14,
-    fontWeight: '300',
-    lineHeight: 21,
-    marginTop: 14,
-  },
-
-  // ── ball ──────────────────────────────────────────────────────────────────
-  ball: {
-    position: 'absolute',
+  masthead: {
+    position: 'absolute', top: 78, left: 28, right: 28,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     zIndex: 5,
-    overflow: 'visible',
+  },
+  metaText: {
+    fontFamily: 'JetBrainsMono_400Regular',
+    fontSize: 10, letterSpacing: 2.6, textTransform: 'uppercase',
   },
 
-  // ── data bar ──────────────────────────────────────────────────────────────
-  dataBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 28,
-    zIndex: 20,
+  hairline: {
+    position: 'absolute', top: 102, left: 28, right: 28,
+    height: StyleSheet.hairlineWidth, backgroundColor: T.inkFaint, zIndex: 5,
   },
-  sep: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: C.c15,
-    marginBottom: 10,
+
+  heroOuter: {
+    position: 'absolute', top: 196, left: 0, right: 0,
+    alignItems: 'center', zIndex: 6,
   },
-  dataRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  heroInner: { width: 240, height: 240 },
+
+  coinPos: { position: 'absolute', top: 17, left: 17 },
+
+  wordmark: {
+    position: 'absolute', top: 472, left: 28, right: 28,
+    alignItems: 'center', zIndex: 6,
+    paddingHorizontal: 24,
   },
-  dataLabel: {
-    color: C.c55,
-    fontSize: 10,
-    fontWeight: '500',
-    letterSpacing: 1.8,
-    textTransform: 'uppercase',
+  wordmarkCricket: {
+    fontFamily: 'BricolageGrotesque_700Bold',
+    fontSize: cricketFontSize,
+    lineHeight: Math.round(cricketFontSize * 1.05),
+    letterSpacing: -2.5,
+    color: T.ink,
+    textAlign: 'center',
   },
-  progressLine: {
-    marginTop: 10,
-    height: 2,
-    overflow: 'hidden',
-    borderRadius: 1,
+  wordmarkTosser: {
+    fontFamily: 'BricolageGrotesque_400Regular',
+    fontSize: tosserFontSize,
+    lineHeight: Math.round(tosserFontSize * 1.35),
+    letterSpacing: 0,
+    color: T.oxblood,
+    textAlign: 'center',
+    transform: [{ skewX: '-12deg' }],
+  },
+  tagline: {
+    marginTop: 16,
+    fontFamily: 'BricolageGrotesque_400Regular',
+    fontSize: 16, lineHeight: 22,
+    color: T.inkSoft, textAlign: 'center', maxWidth: 260,
+  },
+
+  loader: {
+    position: 'absolute', bottom: 88, left: 28, right: 28, zIndex: 7,
+  },
+  loaderHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 12,
+  },
+  loaderLabelRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+  },
+  loaderDot: {
+    width: 6, height: 6, borderRadius: 3, backgroundColor: T.oxblood,
+  },
+  loaderLabel: {
+    fontFamily: 'JetBrainsMono_400Regular',
+    fontSize: 10, letterSpacing: 2.2, textTransform: 'uppercase', color: T.inkLow,
+  },
+  loaderPct: {
+    fontFamily: 'JetBrainsMono_700Bold',
+    fontSize: 12, color: T.ink,
+  },
+  loaderTrack: {
+    height: 3, borderRadius: 2, backgroundColor: T.inkFaint, overflow: 'hidden',
+  },
+  loaderFill: {
+    height: '100%', overflow: 'hidden',
   },
 })

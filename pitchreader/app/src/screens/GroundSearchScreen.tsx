@@ -6,9 +6,9 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   ActivityIndicator,
 } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '../../App'
 import { theme } from '../theme'
@@ -160,14 +160,14 @@ export default function GroundSearchScreen({ navigation, route }: Props) {
             ref={inputRef}
             style={styles.searchInput}
             placeholder="Search cricket ground or club..."
-            placeholderTextColor={theme.text.muted}
+            placeholderTextColor={theme.textSecondary}
             value={query}
             onChangeText={handleQueryChange}
             autoCorrect={false}
             returnKeyType="search"
           />
           {loadingPlaces && (
-            <ActivityIndicator size="small" color={theme.green.mid} style={styles.spinner} />
+            <ActivityIndicator size="small" color={theme.pitch} style={styles.spinner} />
           )}
         </View>
 
@@ -199,59 +199,59 @@ export default function GroundSearchScreen({ navigation, route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.green.dark },
+  root: { flex: 1, backgroundColor: theme.forest },
   nav: {
-    backgroundColor: theme.green.dark,
+    backgroundColor: theme.forest,
     padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  back: { color: '#fff', fontSize: 22, paddingRight: 8 },
-  navTitle: { color: '#fff', fontSize: 16, fontWeight: '500', textAlign: 'center' },
-  navSub: { color: theme.green.light, fontSize: 11, textAlign: 'center' },
-  body: { flex: 1, backgroundColor: theme.soil, padding: 14 },
+  back: { color: theme.textInverse, fontSize: 22, paddingRight: 8 },
+  navTitle: { color: theme.textInverse, fontSize: 16, fontWeight: '500', textAlign: 'center' },
+  navSub: { color: 'rgba(247,242,232,0.70)', fontSize: 11, textAlign: 'center' },
+  body: { flex: 1, backgroundColor: theme.cream, padding: 14 },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.white,
+    backgroundColor: theme.paper,
     borderWidth: 1,
-    borderColor: theme.soilBorder,
-    borderRadius: 10,
+    borderColor: theme.line,
+    borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 10,
   },
   searchIcon: { fontSize: 16, marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 15, color: theme.text.mid, padding: 0 },
+  searchInput: { flex: 1, fontSize: 15, color: theme.textPrimary, padding: 0 },
   spinner: { marginLeft: 8 },
   list: { paddingBottom: 24 },
   pinnedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E1F5EE',
-    borderRadius: 10,
+    backgroundColor: '#E8F2DC',
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 13,
   },
   pinnedIcon: { fontSize: 18, marginRight: 10 },
-  pinnedText: { fontSize: 14, fontWeight: '500', color: theme.green.mid },
-  pinnedSub: { fontSize: 12, color: theme.text.muted, marginTop: 2 },
-  divider: { height: 1, backgroundColor: theme.soilBorder, marginVertical: 8 },
+  pinnedText: { fontSize: 14, fontWeight: '500', color: theme.pitch },
+  pinnedSub: { fontSize: 12, color: theme.textSecondary, marginTop: 2 },
+  divider: { height: 1, backgroundColor: theme.line, marginVertical: 8 },
   row: {
-    backgroundColor: theme.white,
-    borderRadius: 10,
+    backgroundColor: theme.paper,
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 13,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: theme.soilBorder,
+    borderColor: theme.line,
   },
-  rowName: { fontSize: 14, fontWeight: '500', color: theme.text.dark },
-  rowSub: { fontSize: 12, color: theme.text.muted, marginTop: 2 },
+  rowName: { fontSize: 14, fontWeight: '500', color: theme.textPrimary },
+  rowSub: { fontSize: 12, color: theme.textSecondary, marginTop: 2 },
   emptyText: {
     fontSize: 14,
-    color: theme.text.muted,
+    color: theme.textSecondary,
     textAlign: 'center',
     marginTop: 16,
   },

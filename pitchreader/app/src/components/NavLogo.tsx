@@ -14,17 +14,17 @@ export default function NavLogo() {
         </View>
         <Text style={styles.letter}>SSER</Text>
       </View>
-      <Text style={styles.ai}>POWERED BY AI</Text>
+      <Text style={styles.ai}>PITCH INTELLIGENCE</Text>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  wrap: { alignItems: 'center' },
+  wrap: { alignItems: 'flex-start' },
   cricket: {
     fontSize: 8,
     fontWeight: '500',
-    color: '#7ec87e',
+    color: 'rgba(247,242,232,0.65)',
     letterSpacing: 4,
     marginBottom: 1,
   },
@@ -36,14 +36,14 @@ const styles = StyleSheet.create({
   letter: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#f5f0e8',
+    color: '#FFFDF7',
     fontFamily: 'serif',
   },
   ball: {
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#cc2222',
+    backgroundColor: '#903020',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
   },
   ai: {
     fontSize: 6,
-    color: '#7ec87e',
+    color: 'rgba(247,242,232,0.65)',
     letterSpacing: 2,
     marginTop: 1,
     opacity: 0.8,

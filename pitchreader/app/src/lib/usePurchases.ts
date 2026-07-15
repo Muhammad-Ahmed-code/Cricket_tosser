@@ -9,6 +9,7 @@ import {
 } from './purchases'
 import { usageStore } from './usageStore'
 import { useSupabaseClient } from './supabaseClient'
+import { track } from './analytics'
 
 export function usePurchases() {
   const { isLoaded, isSignedIn, userId } = useAuth()
@@ -66,12 +67,17 @@ export function usePurchases() {
   }
 
   const purchaseYearlyPlan = async (): Promise<boolean> => {
+    if (!isSignedIn) throw new Error('You must be signed in before purchasing.')
     const success = await purchaseFn()
-    if (success) await syncAfterPurchase(true)
+    if (success) {
+      track('subscription_purchased', { plan: 'yearly', price: '£9.99' })
+      await syncAfterPurchase(true)
+    }
     return success
   }
 
   const restorePurchases = async (): Promise<boolean> => {
+    if (!isSignedIn) throw new Error('You must be signed in to restore purchases.')
     const success = await restoreFn()
     if (success) await syncAfterPurchase(true)
     return success

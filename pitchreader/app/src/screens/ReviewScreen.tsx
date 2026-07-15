@@ -8,26 +8,29 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '@clerk/clerk-expo'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '../../App'
 import { useSupabaseClient } from '../lib/supabaseClient'
+import { track } from '../lib/analytics'
+import { reportHistoryStore } from '../lib/reportHistoryStore'
+import { cancelMatchReminderNotification } from '../lib/notificationService'
 
 const C = {
-  cream: '#F1EAD8',
-  dark: '#1A0E0C',
-  red: '#A8331F',
-  tan: '#C2A172',
-  mutedText: 'rgba(26,14,12,0.62)',
-  dimText: 'rgba(26,14,12,0.40)',
-  veryMuted: 'rgba(26,14,12,0.18)',
-  divider: 'rgba(26,14,12,0.10)',
-  white: '#FFFFFF',
-  cardFill: '#FFF8E8',
+  cream:     '#F7F2E8',
+  dark:      '#104020',
+  red:       '#903020',
+  tan:       '#507020',
+  mutedText: '#52624A',
+  dimText:   'rgba(82,98,74,0.55)',
+  veryMuted: 'rgba(208,212,197,0.55)',
+  divider:   'rgba(208,212,197,0.60)',
+  white:     '#FFFDF7',
+  cardFill:  '#FFFDF7',
 }
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Review'>
@@ -59,6 +62,92 @@ function ToggleGroup<T extends string>({
   )
 }
 
+function deriveBattingOrder(
+  tossWon: boolean | null,
+  tossDecision: 'bat' | 'bowl' | null,
+): 'user' | 'opposition' | null {
+  if (tossWon === null || tossDecision === null) return null
+  if (tossWon) return tossDecision === 'bat' ? 'user' : 'opposition'
+  return tossDecision === 'bat' ? 'opposition' : 'user'
+}
+
+function ScorecardCard({
+  inningsLabel,
+  teamLabel,
+  runs,
+  onRunsChange,
+  wickets,
+  onWicketsChange,
+  overs,
+  onOversChange,
+}: {
+  inningsLabel: string
+  teamLabel: string | null
+  runs: string
+  onRunsChange: (v: string) => void
+  wickets: string
+  onWicketsChange: (v: string) => void
+  overs: string
+  onOversChange: (v: string) => void
+}) {
+  return (
+    <View style={styles.scorecardCard}>
+      <View style={styles.scorecardHeader}>
+        <Text style={styles.scorecardInningsTag}>{inningsLabel}</Text>
+        {teamLabel && <Text style={styles.scorecardTeam}>{teamLabel}</Text>}
+      </View>
+      <View style={styles.scorecardRow}>
+        <View style={styles.scorecardField}>
+          <Text style={styles.scorecardFieldLabel}>Runs</Text>
+          <View style={styles.scorecardInputWrap}>
+            <TextInput
+              style={styles.scorecardInput}
+              keyboardType="number-pad"
+              maxLength={4}
+              placeholder="0"
+              placeholderTextColor={C.dimText}
+              value={runs}
+              onChangeText={onRunsChange}
+            />
+          </View>
+        </View>
+        <View style={styles.scorecardField}>
+          <Text style={styles.scorecardFieldLabel}>Wickets</Text>
+          <View style={styles.scorecardInputWrap}>
+            <TextInput
+              style={styles.scorecardInput}
+              keyboardType="number-pad"
+              maxLength={2}
+              placeholder="0"
+              placeholderTextColor={C.dimText}
+              value={wickets}
+              onChangeText={v => {
+                if (v === '') { onWicketsChange(''); return }
+                const n = parseInt(v, 10)
+                if (!isNaN(n) && n >= 0 && n <= 10) onWicketsChange(String(n))
+              }}
+            />
+          </View>
+        </View>
+        <View style={styles.scorecardField}>
+          <Text style={styles.scorecardFieldLabel}>Overs</Text>
+          <View style={styles.scorecardInputWrap}>
+            <TextInput
+              style={styles.scorecardInput}
+              keyboardType="decimal-pad"
+              maxLength={5}
+              placeholder="0.0"
+              placeholderTextColor={C.dimText}
+              value={overs}
+              onChangeText={onOversChange}
+            />
+          </View>
+        </View>
+      </View>
+    </View>
+  )
+}
+
 export default function ReviewScreen({ route, navigation }: Props) {
   const { reportId, groundName } = route.params
   const { userId } = useAuth()
@@ -67,32 +156,58 @@ export default function ReviewScreen({ route, navigation }: Props) {
   const [existingReviewId, setExistingReviewId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-
-  const [tossWon, setTossWon] = useState<'yes' | 'no' | null>(null)
+  const [tossReportCompleted, setTossReportCompleted] = useState(false)
+  const [tossWon, setTossWon] = useState<boolean | null>(null)
   const [tossDecision, setTossDecision] = useState<'bat' | 'bowl' | null>(null)
+  // True when we're editing a previously submitted match result (vs first submission)
+  const [isEditMode, setIsEditMode] = useState(false)
+
+  // Stage 2 fields only — toss fields live in ReportScreen (Stage 1)
   const [matchWon, setMatchWon] = useState<'yes' | 'no' | null>(null)
-  const [actualParScore, setActualParScore] = useState('')
+  const [firstInningsRuns, setFirstInningsRuns] = useState('')
+  const [firstInningsWickets, setFirstInningsWickets] = useState('')
+  const [firstInningsOvers, setFirstInningsOvers] = useState('')
+  const [secondInningsRuns, setSecondInningsRuns] = useState('')
+  const [secondInningsWickets, setSecondInningsWickets] = useState('')
+  const [secondInningsOvers, setSecondInningsOvers] = useState('')
   const [pitchRating, setPitchRating] = useState<number | null>(null)
   const [notes, setNotes] = useState('')
 
-  // Load existing review if one exists for this report
   useEffect(() => {
     ;(async () => {
       setLoading(true)
-      const { data } = await supabase
-        .from('reviews')
-        .select('*')
-        .eq('report_id', reportId)
-        .maybeSingle()
+      const [supabaseResult, localEntries] = await Promise.all([
+        supabase
+          .from('reviews')
+          .select(`
+            id, toss_report_completed, toss_won, toss_decision,
+            match_won, pitch_rating, notes,
+            first_innings_runs, first_innings_wickets, first_innings_overs,
+            second_innings_runs, second_innings_wickets, second_innings_overs
+          `)
+          .eq('report_id', reportId)
+          .maybeSingle(),
+        reportHistoryStore.getAll(),
+      ])
+      const data = supabaseResult.data
+      const localEntry = localEntries.find(r => r.id === reportId)
 
       if (data) {
         setExistingReviewId(data.id)
-        setTossWon(data.toss_won === true ? 'yes' : data.toss_won === false ? 'no' : null)
+        setTossReportCompleted(data.toss_report_completed ?? false)
+        setTossWon(data.toss_won ?? null)
         setTossDecision(data.toss_decision ?? null)
         setMatchWon(data.match_won === true ? 'yes' : data.match_won === false ? 'no' : null)
-        setActualParScore(data.actual_par_score != null ? String(data.actual_par_score) : '')
         setPitchRating(data.pitch_rating ?? null)
         setNotes(data.notes ?? '')
+        setFirstInningsRuns(data.first_innings_runs != null ? String(data.first_innings_runs) : '')
+        setFirstInningsWickets(data.first_innings_wickets != null ? String(data.first_innings_wickets) : '')
+        setFirstInningsOvers(data.first_innings_overs != null ? String(data.first_innings_overs) : '')
+        setSecondInningsRuns(data.second_innings_runs != null ? String(data.second_innings_runs) : '')
+        setSecondInningsWickets(data.second_innings_wickets != null ? String(data.second_innings_wickets) : '')
+        setSecondInningsOvers(data.second_innings_overs != null ? String(data.second_innings_overs) : '')
+        // Edit mode: local store was previously marked as completed (most reliable signal)
+        setIsEditMode(localEntry?.match_completed === true)
       }
       setLoading(false)
     })()
@@ -105,13 +220,16 @@ export default function ReviewScreen({ route, navigation }: Props) {
     }
     setSaving(true)
     try {
+      const firstInningsTeam = deriveBattingOrder(tossWon, tossDecision)
       const payload = {
-        report_id: reportId,
-        user_id: userId,
-        toss_won: tossWon === 'yes' ? true : tossWon === 'no' ? false : null,
-        toss_decision: tossDecision ?? null,
         match_won: matchWon === 'yes' ? true : matchWon === 'no' ? false : null,
-        actual_par_score: actualParScore ? parseInt(actualParScore, 10) : null,
+        first_innings_runs: firstInningsRuns ? parseInt(firstInningsRuns, 10) : null,
+        first_innings_wickets: firstInningsWickets ? parseInt(firstInningsWickets, 10) : null,
+        first_innings_overs: firstInningsOvers ? parseFloat(firstInningsOvers) : null,
+        second_innings_runs: secondInningsRuns ? parseInt(secondInningsRuns, 10) : null,
+        second_innings_wickets: secondInningsWickets ? parseInt(secondInningsWickets, 10) : null,
+        second_innings_overs: secondInningsOvers ? parseFloat(secondInningsOvers) : null,
+        first_innings_team: firstInningsTeam,
         pitch_rating: pitchRating,
         notes: notes || null,
       }
@@ -123,21 +241,41 @@ export default function ReviewScreen({ route, navigation }: Props) {
           .eq('id', existingReviewId)
         if (error) throw error
       } else {
-        const { error } = await supabase.from('reviews').insert(payload)
+        const { error } = await supabase.from('reviews').insert({
+          ...payload,
+          report_id: reportId,
+          user_id: userId,
+        })
         if (error) throw error
       }
 
-      Alert.alert(
-        'Match result saved!',
-        'Thanks for the feedback.',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      )
-    } catch (err) {
+      const matchResult = matchWon === 'yes' ? 'won' : matchWon === 'no' ? 'lost' : null
+      track('match_report_completed', {
+        ...(matchResult ? { match_result: matchResult } : {}),
+        report_id: reportId,
+        ...(firstInningsRuns ? { first_innings_runs: parseInt(firstInningsRuns, 10) } : {}),
+        ...(secondInningsRuns ? { second_innings_runs: parseInt(secondInningsRuns, 10) } : {}),
+        ...(firstInningsTeam ? { first_innings_team: firstInningsTeam } : {}),
+      })
+      reportHistoryStore.markMatchCompleted(reportId)
+      cancelMatchReminderNotification(reportId)
+      if (isEditMode) {
+        navigation.goBack()
+      } else {
+        Alert.alert(
+          'Match result saved!',
+          'Thanks for the feedback.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        )
+      }
+    } catch {
       Alert.alert('Save failed', 'Please try again.')
     } finally {
       setSaving(false)
     }
   }
+
+  const firstBattingTeam = deriveBattingOrder(tossWon, tossDecision)
 
   if (loading) {
     return (
@@ -159,119 +297,127 @@ export default function ReviewScreen({ route, navigation }: Props) {
         >
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>MATCH RESULT</Text>
+        <Text style={styles.headerTitle}>MATCH REPORT</Text>
         <View style={{ width: 28 }} />
       </View>
       <View style={styles.headerDivider} />
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView contentContainerStyle={styles.scroll}>
+      {/* Stage 1 not yet complete — locked state */}
+      {!tossReportCompleted ? (
+        <View style={styles.lockedContainer}>
+          <Text style={styles.lockedIcon}>🔒</Text>
+          <Text style={styles.lockedTitle}>Complete Toss Report First</Text>
+          <Text style={styles.lockedSub}>
+            Go back to the report screen and fill in the Toss Report before adding match results.
+          </Text>
+          <TouchableOpacity style={styles.goBackBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
+            <Text style={styles.goBackBtnText}>← Back to report</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView contentContainerStyle={styles.scroll}>
 
-          <Text style={styles.groundLabel}>{groundName}</Text>
+            <Text style={styles.groundLabel}>{groundName}</Text>
 
-          {/* Toss won */}
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Did you win the toss?</Text>
-            <ToggleGroup<'yes' | 'no'>
-              options={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }]}
-              value={tossWon}
-              onChange={setTossWon}
-            />
-          </View>
-
-          {/* Toss decision */}
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Toss decision</Text>
-            <ToggleGroup<'bat' | 'bowl'>
-              options={[{ label: 'Bat', value: 'bat' }, { label: 'Bowl', value: 'bowl' }]}
-              value={tossDecision}
-              onChange={setTossDecision}
-            />
-          </View>
-
-          {/* Match won */}
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Did you win the match?</Text>
-            <ToggleGroup<'yes' | 'no'>
-              options={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }]}
-              value={matchWon}
-              onChange={setMatchWon}
-            />
-          </View>
-
-          {/* Actual par score */}
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Actual par score</Text>
-            <View style={styles.inputWrap}>
-              <TextInput
-                style={styles.input}
-                keyboardType="number-pad"
-                maxLength={4}
-                placeholder="e.g. 220"
-                placeholderTextColor={C.dimText}
-                value={actualParScore}
-                onChangeText={setActualParScore}
+            {/* Match won */}
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Did you win the match?</Text>
+              <ToggleGroup<'yes' | 'no'>
+                options={[{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }]}
+                value={matchWon}
+                onChange={setMatchWon}
               />
             </View>
-          </View>
 
-          {/* Pitch rating */}
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>How was the pitch?</Text>
-            <View style={styles.starsRow}>
-              {[1, 2, 3, 4, 5].map(n => (
-                <TouchableOpacity
-                  key={n}
-                  onPress={() => setPitchRating(pitchRating === n ? null : n)}
-                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                >
-                  <Text style={[
-                    styles.star,
-                    (pitchRating ?? 0) >= n && styles.starFilled,
-                  ]}>
-                    ★
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Notes */}
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Notes</Text>
-            <TextInput
-              style={styles.notesInput}
-              multiline
-              numberOfLines={4}
-              placeholder="How did the pitch play? Any surprises?"
-              placeholderTextColor={C.dimText}
-              value={notes}
-              onChangeText={setNotes}
-              textAlignVertical="top"
+            {/* Innings scorecards */}
+            <ScorecardCard
+              inningsLabel="1ST INNINGS"
+              teamLabel={
+                firstBattingTeam === 'user' ? 'Your Team'
+                : firstBattingTeam === 'opposition' ? 'Opposition'
+                : null
+              }
+              runs={firstInningsRuns}
+              onRunsChange={setFirstInningsRuns}
+              wickets={firstInningsWickets}
+              onWicketsChange={setFirstInningsWickets}
+              overs={firstInningsOvers}
+              onOversChange={setFirstInningsOvers}
             />
-          </View>
+            <ScorecardCard
+              inningsLabel="2ND INNINGS"
+              teamLabel={
+                firstBattingTeam === 'user' ? 'Opposition'
+                : firstBattingTeam === 'opposition' ? 'Your Team'
+                : null
+              }
+              runs={secondInningsRuns}
+              onRunsChange={setSecondInningsRuns}
+              wickets={secondInningsWickets}
+              onWicketsChange={setSecondInningsWickets}
+              overs={secondInningsOvers}
+              onOversChange={setSecondInningsOvers}
+            />
 
-          {/* Submit */}
-          <TouchableOpacity
-            style={[styles.submitBtn, saving && styles.submitBtnDisabled]}
-            onPress={handleSubmit}
-            disabled={saving}
-            activeOpacity={0.85}
-          >
-            {saving ? (
-              <ActivityIndicator color={C.white} />
-            ) : (
-              <Text style={styles.submitBtnText}>
-                {existingReviewId ? 'Update match result' : 'Save match result'}
-              </Text>
-            )}
-          </TouchableOpacity>
+            {/* Pitch rating */}
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>How was the pitch?</Text>
+              <View style={styles.starsRow}>
+                {[1, 2, 3, 4, 5].map(n => (
+                  <TouchableOpacity
+                    key={n}
+                    onPress={() => setPitchRating(pitchRating === n ? null : n)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                  >
+                    <Text style={[
+                      styles.star,
+                      (pitchRating ?? 0) >= n && styles.starFilled,
+                    ]}>
+                      ★
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
 
-        </ScrollView>
-      </KeyboardAvoidingView>
+            {/* Notes */}
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Notes</Text>
+              <TextInput
+                style={styles.notesInput}
+                multiline
+                numberOfLines={4}
+                placeholder="How did the pitch play? Any surprises?"
+                placeholderTextColor={C.dimText}
+                value={notes}
+                onChangeText={setNotes}
+                textAlignVertical="top"
+              />
+            </View>
+
+            {/* Submit */}
+            <TouchableOpacity
+              style={[styles.submitBtn, saving && styles.submitBtnDisabled]}
+              onPress={handleSubmit}
+              disabled={saving}
+              activeOpacity={0.85}
+            >
+              {saving ? (
+                <ActivityIndicator color={C.white} />
+              ) : (
+                <Text style={styles.submitBtnText}>
+                  {existingReviewId ? 'Update match result' : 'Save match result'}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+          </ScrollView>
+        </KeyboardAvoidingView>
+      )}
     </SafeAreaView>
   )
 }
@@ -286,15 +432,46 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    backgroundColor: '#104020',
   },
-  backText: { fontSize: 22, color: C.dark, lineHeight: 28 },
+  backText: { fontSize: 22, color: '#FFFDF7', lineHeight: 28 },
   headerTitle: {
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 2.2,
-    color: C.tan,
+    color: 'rgba(247,242,232,0.80)',
   },
-  headerDivider: { height: 1, backgroundColor: C.divider },
+  headerDivider: { height: 1, backgroundColor: 'rgba(247,242,232,0.15)' },
+
+  // Locked state
+  lockedContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 12,
+  },
+  lockedIcon: { fontSize: 44, marginBottom: 4 },
+  lockedTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: C.dark,
+    textAlign: 'center',
+  },
+  lockedSub: {
+    fontSize: 14,
+    color: C.mutedText,
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+  goBackBtn: {
+    backgroundColor: C.dark,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+    marginTop: 8,
+  },
+  goBackBtnText: { color: C.white, fontSize: 15, fontWeight: '600' },
 
   scroll: { padding: 20, paddingBottom: 40 },
 
@@ -317,16 +494,16 @@ const styles = StyleSheet.create({
   toggleRow: { flexDirection: 'row', gap: 10 },
   toggleBtn: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
+    paddingVertical: 14,
+    borderRadius: 999,
     alignItems: 'center',
     backgroundColor: C.cardFill,
     borderWidth: 1.5,
     borderColor: C.veryMuted,
   },
   toggleBtnActive: {
-    backgroundColor: C.red,
-    borderColor: C.red,
+    backgroundColor: C.dark,
+    borderColor: C.dark,
   },
   toggleText: {
     fontSize: 14,
@@ -336,8 +513,8 @@ const styles = StyleSheet.create({
   toggleTextActive: { color: C.white },
 
   inputWrap: {
-    backgroundColor: C.white,
-    borderRadius: 10,
+    backgroundColor: C.cardFill,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.divider,
     paddingHorizontal: 14,
@@ -355,11 +532,11 @@ const styles = StyleSheet.create({
     color: C.veryMuted,
     lineHeight: 40,
   },
-  starFilled: { color: C.tan },
+  starFilled: { color: C.red },
 
   notesInput: {
-    backgroundColor: C.white,
-    borderRadius: 10,
+    backgroundColor: C.cardFill,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.divider,
     paddingHorizontal: 14,
@@ -372,7 +549,7 @@ const styles = StyleSheet.create({
 
   submitBtn: {
     backgroundColor: C.dark,
-    borderRadius: 14,
+    borderRadius: 16,
     paddingVertical: 18,
     alignItems: 'center',
     minHeight: 58,
@@ -385,5 +562,59 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.2,
+  },
+
+  scorecardCard: {
+    backgroundColor: C.cardFill,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.divider,
+    padding: 14,
+    marginBottom: 12,
+  },
+  scorecardHeader: {
+    marginBottom: 12,
+  },
+  scorecardInningsTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    color: C.mutedText,
+    marginBottom: 3,
+  },
+  scorecardTeam: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: C.dark,
+  },
+  scorecardRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  scorecardField: {
+    flex: 1,
+  },
+  scorecardFieldLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.mutedText,
+    marginBottom: 6,
+  },
+  scorecardInputWrap: {
+    backgroundColor: C.cream,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.divider,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  scorecardInput: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: C.dark,
+    padding: 0,
+    textAlign: 'center',
+    width: '100%',
   },
 })
