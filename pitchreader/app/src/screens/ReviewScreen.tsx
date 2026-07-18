@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import {
   View,
   Text,
@@ -80,6 +80,7 @@ function ScorecardCard({
   onWicketsChange,
   overs,
   onOversChange,
+  onFocus,
 }: {
   inningsLabel: string
   teamLabel: string | null
@@ -89,6 +90,7 @@ function ScorecardCard({
   onWicketsChange: (v: string) => void
   overs: string
   onOversChange: (v: string) => void
+  onFocus?: () => void
 }) {
   return (
     <View style={styles.scorecardCard}>
@@ -108,6 +110,7 @@ function ScorecardCard({
               placeholderTextColor={C.dimText}
               value={runs}
               onChangeText={onRunsChange}
+              onFocus={onFocus}
             />
           </View>
         </View>
@@ -126,6 +129,7 @@ function ScorecardCard({
                 const n = parseInt(v, 10)
                 if (!isNaN(n) && n >= 0 && n <= 10) onWicketsChange(String(n))
               }}
+              onFocus={onFocus}
             />
           </View>
         </View>
@@ -140,6 +144,7 @@ function ScorecardCard({
               placeholderTextColor={C.dimText}
               value={overs}
               onChangeText={onOversChange}
+              onFocus={onFocus}
             />
           </View>
         </View>
@@ -152,6 +157,16 @@ export default function ReviewScreen({ route, navigation }: Props) {
   const { reportId, groundName } = route.params
   const { userId } = useAuth()
   const supabase = useSupabaseClient()
+
+  const scrollViewRef = useRef<ScrollView>(null)
+  const sectionOffsets = useRef<Record<string, number>>({})
+
+  const scrollToSection = (key: string) => {
+    const y = sectionOffsets.current[key]
+    if (y != null) {
+      scrollViewRef.current?.scrollTo({ y: Math.max(0, y - 20), animated: true })
+    }
+  }
 
   const [existingReviewId, setExistingReviewId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -317,9 +332,14 @@ export default function ReviewScreen({ route, navigation }: Props) {
       ) : (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
-          <ScrollView contentContainerStyle={styles.scroll}>
+          <ScrollView
+            ref={scrollViewRef}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.scroll}
+          >
 
             <Text style={styles.groundLabel}>{groundName}</Text>
 
@@ -334,34 +354,40 @@ export default function ReviewScreen({ route, navigation }: Props) {
             </View>
 
             {/* Innings scorecards */}
-            <ScorecardCard
-              inningsLabel="1ST INNINGS"
-              teamLabel={
-                firstBattingTeam === 'user' ? 'Your Team'
-                : firstBattingTeam === 'opposition' ? 'Opposition'
-                : null
-              }
-              runs={firstInningsRuns}
-              onRunsChange={setFirstInningsRuns}
-              wickets={firstInningsWickets}
-              onWicketsChange={setFirstInningsWickets}
-              overs={firstInningsOvers}
-              onOversChange={setFirstInningsOvers}
-            />
-            <ScorecardCard
-              inningsLabel="2ND INNINGS"
-              teamLabel={
-                firstBattingTeam === 'user' ? 'Opposition'
-                : firstBattingTeam === 'opposition' ? 'Your Team'
-                : null
-              }
-              runs={secondInningsRuns}
-              onRunsChange={setSecondInningsRuns}
-              wickets={secondInningsWickets}
-              onWicketsChange={setSecondInningsWickets}
-              overs={secondInningsOvers}
-              onOversChange={setSecondInningsOvers}
-            />
+            <View onLayout={e => { sectionOffsets.current['first'] = e.nativeEvent.layout.y }}>
+              <ScorecardCard
+                inningsLabel="1ST INNINGS"
+                teamLabel={
+                  firstBattingTeam === 'user' ? 'Your Team'
+                  : firstBattingTeam === 'opposition' ? 'Opposition'
+                  : null
+                }
+                runs={firstInningsRuns}
+                onRunsChange={setFirstInningsRuns}
+                wickets={firstInningsWickets}
+                onWicketsChange={setFirstInningsWickets}
+                overs={firstInningsOvers}
+                onOversChange={setFirstInningsOvers}
+                onFocus={() => scrollToSection('first')}
+              />
+            </View>
+            <View onLayout={e => { sectionOffsets.current['second'] = e.nativeEvent.layout.y }}>
+              <ScorecardCard
+                inningsLabel="2ND INNINGS"
+                teamLabel={
+                  firstBattingTeam === 'user' ? 'Opposition'
+                  : firstBattingTeam === 'opposition' ? 'Your Team'
+                  : null
+                }
+                runs={secondInningsRuns}
+                onRunsChange={setSecondInningsRuns}
+                wickets={secondInningsWickets}
+                onWicketsChange={setSecondInningsWickets}
+                overs={secondInningsOvers}
+                onOversChange={setSecondInningsOvers}
+                onFocus={() => scrollToSection('second')}
+              />
+            </View>
 
             {/* Pitch rating */}
             <View style={styles.field}>
@@ -396,6 +422,7 @@ export default function ReviewScreen({ route, navigation }: Props) {
                 value={notes}
                 onChangeText={setNotes}
                 textAlignVertical="top"
+                onFocus={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
               />
             </View>
 
@@ -473,7 +500,7 @@ const styles = StyleSheet.create({
   },
   goBackBtnText: { color: C.white, fontSize: 15, fontWeight: '600' },
 
-  scroll: { padding: 20, paddingBottom: 40 },
+  scroll: { padding: 20, paddingBottom: 120 },
 
   groundLabel: {
     fontSize: 19,

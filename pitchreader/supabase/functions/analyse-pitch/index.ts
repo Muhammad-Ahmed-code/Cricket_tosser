@@ -261,9 +261,7 @@ For the "team" analysis:
 - Be direct and specific — "Your ${squad.seamers + squad.fastAllRounders} pace options will exploit this damp surface" not vague generalities
 - Only include role_tips relevant to player types actually in the squad` : '';
 
-    imageBlocks.push({
-      type: "text",
-      text: `You are an expert cricket pitch reader with 20 years of UK club cricket experience.
+    const systemPrompt = `You are an expert cricket pitch reader with 20 years of UK club cricket experience.
 You will be shown ${imageBase64Array.length} photos of the same pitch taken from different angles — full length views from both ends plus close-up surface shots.
 
 CRITICAL INSTRUCTION:
@@ -343,8 +341,7 @@ ${squadAnalysisInstructions}
 RAIN IMPACT RULES (apply to BOTH general.rain_impact and team.rain_impact):
 - If rain_probability_percent < 25: "rain_impact" must be null — do not mention DLS anywhere
 - If rain_probability_percent is 25–50: set affects_toss: true, mention DLS as secondary factor, keep recommendation measured
-- If rain_probability_percent > 50: set affects_toss: true, strong recommendation to bowl first, DLS advantage is a primary factor`,
-    });
+- If rain_probability_percent > 50: set affects_toss: true, strong recommendation to bowl first, DLS advantage is a primary factor`;
 
     // --- Step 4: Call Claude ---
     console.log(`[${requestId}] Calling Claude with ${imageBase64Array.length} images`);
@@ -359,7 +356,8 @@ RAIN IMPACT RULES (apply to BOTH general.rain_impact and team.rain_impact):
         },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 3500,
+          max_tokens: 1500,
+          system: systemPrompt,
           messages: [{ role: "user", content: imageBlocks }],
         }),
       });

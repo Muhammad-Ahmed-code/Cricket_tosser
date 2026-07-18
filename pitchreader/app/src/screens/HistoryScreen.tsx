@@ -58,6 +58,7 @@ function BurgerDrawer({
   onHowItWorks,
   onPrivacy,
   onFeedback,
+  onProfile,
 }: {
   visible: boolean
   onClose: () => void
@@ -67,6 +68,7 @@ function BurgerDrawer({
   onHowItWorks: () => void
   onPrivacy: () => void
   onFeedback: () => void
+  onProfile: () => void
 }) {
   const insets = useSafeAreaInsets()
   const { user } = useUser()
@@ -88,6 +90,7 @@ function BurgerDrawer({
     if (key === 'howitworks')  setTimeout(onHowItWorks, 260)
     if (key === 'privacy')     setTimeout(onPrivacy, 260)
     if (key === 'feedback')    setTimeout(onFeedback, 260)
+    if (key === 'profile')     setTimeout(onProfile, 260)
   }
 
   return (
@@ -96,7 +99,7 @@ function BurgerDrawer({
         <Animated.View style={[drawerSt.drawer, { transform: [{ translateX: tx }] }]}>
           <Pressable style={{ flex: 1 }} onPress={() => {}}>
             <View style={[drawerSt.top, { paddingTop: insets.top + 4 }]}>
-              <UserAvatar imageUrl={user?.imageUrl} name={user?.fullName || user?.firstName} size={40} />
+              <UserAvatar imageUrl={user?.imageUrl} name={user?.fullName || user?.firstName} size={40} onPress={() => handleItem('profile')} />
               <View style={{ flex: 1 }}>
                 <Text style={drawerSt.appName}>Cricket Tosser</Text>
                 <Text style={drawerSt.tagline}>Read the pitch. Win the toss.</Text>
@@ -482,6 +485,7 @@ export default function HistoryScreen({ navigation }: Props) {
           onHowItWorks={() => navigation.navigate('HowItWorks')}
           onPrivacy={() => navigation.navigate('Privacy')}
           onFeedback={() => navigation.navigate('Feedback')}
+          onProfile={() => navigation.navigate('Profile')}
         />
       )}
     </SafeAreaView>

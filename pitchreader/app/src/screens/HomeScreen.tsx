@@ -431,6 +431,7 @@ export default function HomeScreen({ navigation }: Props) {
       }
       return
     }
+    console.log(`[TIMING] Analyse button tapped: ${Date.now()}ms since epoch`)
     const taken = photoStore.getPhotos().filter(Boolean) as string[]
     photoStore.clearPhotos()
     const g = groundStore.getGround()

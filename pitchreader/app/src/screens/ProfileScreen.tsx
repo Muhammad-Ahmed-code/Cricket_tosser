@@ -16,7 +16,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import type { RootStackParamList } from '../../App'
 import { useSupabaseClient } from '../lib/supabaseClient'
 import { usageStore } from '../lib/usageStore'
-import { logoutFromPurchases, restorePurchases } from '../lib/purchases'
+import { logoutFromPurchases, restorePurchases, checkSubscriptionStatus } from '../lib/purchases'
 import { authStore } from '../lib/authStore'
 
 const C = {
@@ -92,9 +92,10 @@ export default function ProfileScreen({ navigation }: Props) {
 
   const handleRestorePurchases = async () => {
     try {
-      const success = await restorePurchases()
-      if (success) {
-        await usageStore.setIsSubscribed(true)
+      await restorePurchases()
+      const subscribed = await checkSubscriptionStatus()
+      await usageStore.setIsSubscribed(subscribed)
+      if (subscribed) {
         Alert.alert('Purchases restored!', 'Your subscription is active.')
       } else {
         Alert.alert('No subscription found', "We couldn't find an active subscription to restore.")

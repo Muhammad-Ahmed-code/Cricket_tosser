@@ -118,6 +118,17 @@ export const navigationRef = createNavigationContainerRef<RootStackParamList>()
 
 const linking = {
   prefixes: [Linking.createURL('')],
+  getInitialURL: async () => {
+    const url = await Linking.getInitialURL()
+    if (url?.includes('oauth-native-callback')) return null
+    return url
+  },
+  subscribe: (listener: (url: string) => void) => {
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      if (!url.includes('oauth-native-callback')) listener(url)
+    })
+    return () => sub.remove()
+  },
 }
 
 async function navigateToReportFromNotification(reportId: string) {

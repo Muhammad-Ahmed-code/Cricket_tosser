@@ -2,10 +2,10 @@
   "expo": {
     "name": "Cricket Tosser",
     "slug": "cricket-tosser",
-    "version": "2.2.0",
+    "version": "2.4.0",
     "scheme": "cricket-tosser",
     "orientation": "portrait",
-    "icon": "./assets/images/app-icon.png",
+    "icon": "./assets/images/APP_ICON_MAIN_WITH_BORDERS.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -22,11 +22,11 @@
         "resizeMode": "contain"
       },
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/app-icon.png",
+        "foregroundImage": "./assets/images/APP_ICON_MAIN_WITH_BORDERS.png",
         "backgroundColor": "#a8331f"
       },
       "package": "com.crickettosser.app",
-      "versionCode": 4,
+      "versionCode": 6,
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "intentFilters": [
@@ -54,7 +54,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/images/app-icon.png"
+      "favicon": "./assets/images/APP_ICON_MAIN_WITH_BORDERS.png"
     },
     "plugins": [
       [
@@ -96,7 +96,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/app-icon.png",
+          "icon": "./assets/images/APP_ICON_MAIN_WITH_BORDERS.png",
           "color": "#104020",
           "androidMode": "default",
           "iosDisplayInForeground": true

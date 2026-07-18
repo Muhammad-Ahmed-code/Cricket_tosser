@@ -106,10 +106,11 @@ export default function AnalysingScreen({ route, navigation }: Props) {
   const [stepStates, setStepStates] = useState<StepState[]>([
     'active', 'pending', 'pending', 'pending', 'pending', 'pending',
   ])
-  const [step5Sub, setStep5Sub] = useState(STEPS[4].sub)
-  const [pct, setPct]           = useState(0)
-  const [error, setError]       = useState<string | null>(null)
-  const [localTime]             = useState(localHHMM)
+  const [step5Sub, setStep5Sub]       = useState(STEPS[4].sub)
+  const [pct, setPct]                 = useState(0)
+  const [error, setError]             = useState<string | null>(null)
+  const [localTime]                   = useState(localHHMM)
+  const [statusMessage, setStatusMessage] = useState('Reading your pitch photos...')
 
   // Scramblers
   const scrMoisture = useScrambler(160)
@@ -234,14 +235,31 @@ export default function AnalysingScreen({ route, navigation }: Props) {
       return
     }
 
-    // Simulated surface-analysis steps (same timing as original)
-    const t1 = setTimeout(() => setStepStates(['done', 'active',   'pending', 'pending', 'pending', 'pending']), 300)
-    const t2 = setTimeout(() => setStepStates(['done', 'done',     'active',  'pending', 'pending', 'pending']), 750)
-    const t3 = setTimeout(() => setStepStates(['done', 'done',     'done',    'active',  'pending', 'pending']), 1200)
-    const t4 = setTimeout(() => setStepStates(['done', 'done',     'done',    'done',    'active',  'pending']), 1700)
+    // Steps spread across full ~22s analysis duration
+    const t1 = setTimeout(() => setStepStates(['done', 'active',   'pending', 'pending', 'pending', 'pending']),  3000)
+    const t2 = setTimeout(() => setStepStates(['done', 'done',     'active',  'pending', 'pending', 'pending']),  7000)
+    const t3 = setTimeout(() => setStepStates(['done', 'done',     'done',    'active',  'pending', 'pending']), 11000)
+    const t4 = setTimeout(() => setStepStates(['done', 'done',     'done',    'done',    'active',  'pending']), 14000)
+    const t5 = setTimeout(() => setStepStates(['done', 'done',     'done',    'done',    'done',    'active'  ]), 17000)
 
-    // Progress → 85% over 12s (same as original)
-    Animated.timing(progressAnim, { toValue: 85, duration: 12000, useNativeDriver: false }).start()
+    // Progress: increment evenly to 95% over expected duration, never freeze
+    const EXPECTED_DURATION_MS = 22000
+    const INTERVAL_MS = 200
+    const progressIncrement = 95 / (EXPECTED_DURATION_MS / INTERVAL_MS)
+    const analysisStart = Date.now()
+    let currentPct = 0
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - analysisStart
+      currentPct = Math.min(95, currentPct + progressIncrement)
+      progressAnim.setValue(currentPct)
+      if      (elapsed <  2000) setStatusMessage('Reading your pitch photos...')
+      else if (elapsed <  5000) setStatusMessage('Checking live weather conditions...')
+      else if (elapsed <  9000) setStatusMessage('Analysing surface texture and wear...')
+      else if (elapsed < 13000) setStatusMessage('Calculating pitch behaviour by phase...')
+      else if (elapsed < 17000) setStatusMessage("Building your captain's report...")
+      else if (elapsed < 21000) setStatusMessage('Adding final recommendations...')
+      else                       setStatusMessage('Almost ready...')
+    }, INTERVAL_MS)
 
     ;(async () => {
       try {
@@ -261,6 +279,8 @@ export default function AnalysingScreen({ route, navigation }: Props) {
         if (conditions) setStep5Sub(`${groundName.toUpperCase()} · ${conditions.toUpperCase()}`)
         else            setStep5Sub(groundName.toUpperCase())
 
+        clearInterval(progressInterval)
+        setStatusMessage('Report ready!')
         setStepStates(['done', 'done', 'done', 'done', 'done', 'active'])
         Animated.timing(progressAnim, { toValue: 100, duration: 700, useNativeDriver: false }).start()
 
@@ -301,7 +321,8 @@ export default function AnalysingScreen({ route, navigation }: Props) {
     })()
 
     return () => {
-      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4)
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); clearTimeout(t5)
+      clearInterval(progressInterval)
     }
   }, [])
 
@@ -536,7 +557,7 @@ export default function AnalysingScreen({ route, navigation }: Props) {
         <View style={styles.progressRail}>
           <View style={styles.progressHeader}>
             <Text style={styles.progressLabel} numberOfLines={1}>
-              {groundName.toUpperCase()} · {localTime}
+              {statusMessage}
             </Text>
             <Text style={styles.progressPct}>
               {String(pct).padStart(2, '0')}
