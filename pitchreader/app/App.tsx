@@ -61,6 +61,16 @@ SplashScreen.preventAutoHideAsync()
 
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? ''
 
+const clerkEnv = CLERK_PUBLISHABLE_KEY.startsWith('pk_live_') ? 'PRODUCTION' : 'DEVELOPMENT'
+const rcIosKey = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? ''
+const rcAndroidKey = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? ''
+console.log(`[ENV] ─────────────────────────────────────────`)
+console.log(`[ENV] Clerk:        ${clerkEnv} (${CLERK_PUBLISHABLE_KEY.slice(0, 12)}...)`)
+console.log(`[ENV] RevenueCat iOS:     ${rcIosKey.slice(0, 12)}...`)
+console.log(`[ENV] RevenueCat Android: ${rcAndroidKey.slice(0, 12)}...`)
+console.log(`[ENV] Supabase: ${process.env.EXPO_PUBLIC_SUPABASE_URL}`)
+console.log(`[ENV] ─────────────────────────────────────────`)
+
 const tokenCache = {
   async getToken(key: string) { return SecureStore.getItemAsync(key) },
   async saveToken(key: string, value: string) { return SecureStore.setItemAsync(key, value) },
@@ -99,7 +109,7 @@ export type RootStackParamList = {
     squad?: { seamers: number; fastAllRounders: number; spinners: number; spinAllRounders: number; batters: number } | null
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  Report: { result: any; teamResult?: any | null; groundName: string; overs: number; squad?: { seamers: number; fastAllRounders: number; spinners: number; spinAllRounders: number; batters: number } | null; reportId?: string; scrollToToss?: boolean; scrollToMatch?: boolean }
+  Report: { result: any; teamResult?: any | null; groundName: string; overs: number; squad?: { seamers: number; fastAllRounders: number; spinners: number; spinAllRounders: number; batters: number } | null; reportId?: string; scrollToToss?: boolean; scrollToMatch?: boolean; photoUris?: string[] }
   GroundSearch: { currentLocationName?: string; currentLat?: number; currentLng?: number }
   Paywall: { trigger?: 'limit_reached' | 'voluntary' | 'restore' } | undefined
   History: undefined
@@ -138,12 +148,14 @@ async function navigateToReportFromNotification(reportId: string) {
     if (!report || !navigationRef.isReady()) return
 
     navigationRef.navigate('Report', {
-      result: { prediction: report.prediction, weather: report.weather },
+      result: { prediction: report.prediction, weather: report.weather, weather_snapshot: report.weather_snapshot ?? null, generated_at: report.generated_at ?? report.created_at },
+      teamResult: report.team_prediction ?? undefined,
       groundName: report.ground_name,
       overs: report.overs,
-      squad: null,
+      squad: report.squad ?? null,
       reportId: report.id.startsWith('local_') ? undefined : report.id,
       scrollToToss: true,
+      photoUris: (report.photo_urls as string[] | undefined) ?? undefined,
     })
   } catch {
     // non-fatal
@@ -157,12 +169,14 @@ async function navigateToReportFromMatchNotification(reportId: string) {
     if (!report || !navigationRef.isReady()) return
 
     navigationRef.navigate('Report', {
-      result: { prediction: report.prediction, weather: report.weather },
+      result: { prediction: report.prediction, weather: report.weather, weather_snapshot: report.weather_snapshot ?? null, generated_at: report.generated_at ?? report.created_at },
+      teamResult: report.team_prediction ?? undefined,
       groundName: report.ground_name,
       overs: report.overs,
-      squad: null,
+      squad: report.squad ?? null,
       reportId: report.id.startsWith('local_') ? undefined : report.id,
       scrollToMatch: true,
+      photoUris: (report.photo_urls as string[] | undefined) ?? undefined,
     })
   } catch {
     // non-fatal
@@ -324,12 +338,14 @@ function AppNavigator({ isOffline, setIsOffline }: { isOffline: boolean; setIsOf
     setReminderData(null)
     if (!navigationRef.isReady()) return
     navigationRef.navigate('Report', {
-      result: { prediction: data.prediction, weather: data.weather },
+      result: { prediction: data.prediction, weather: data.weather, weather_snapshot: data.weather_snapshot ?? null, generated_at: data.generated_at ?? null },
+      teamResult: data.team_prediction ?? undefined,
       groundName: data.groundName,
       overs: data.overs,
       squad: null,
       reportId: data.reportId.startsWith('local_') ? undefined : data.reportId,
       scrollToToss: true,
+      photoUris: data.photo_urls ?? undefined,
     })
   }
 
@@ -344,12 +360,14 @@ function AppNavigator({ isOffline, setIsOffline }: { isOffline: boolean; setIsOf
     setMatchReminderData(null)
     if (!navigationRef.isReady()) return
     navigationRef.navigate('Report', {
-      result: { prediction: data.prediction, weather: data.weather },
+      result: { prediction: data.prediction, weather: data.weather, weather_snapshot: data.weather_snapshot ?? null, generated_at: data.generated_at ?? null },
+      teamResult: data.team_prediction ?? undefined,
       groundName: data.groundName,
       overs: data.overs,
       squad: null,
       reportId: data.reportId.startsWith('local_') ? undefined : data.reportId,
       scrollToMatch: true,
+      photoUris: data.photo_urls ?? undefined,
     })
   }
 

@@ -41,7 +41,7 @@ export default function CameraScreen({ route, navigation }: Props) {
     setLoading('camera')
     try {
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         quality: 0.3,
         allowsEditing: false,
       })
@@ -69,10 +69,9 @@ export default function CameraScreen({ route, navigation }: Props) {
       setLoading('gallery')
       try {
         const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: ['images'],
           allowsEditing: false,
           quality: 1,
-          copyToCacheDirectory: true,
         })
         if (result.canceled) return
         const uri = result.assets[0].uri

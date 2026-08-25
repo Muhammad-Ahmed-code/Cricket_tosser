@@ -109,9 +109,5 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     backfaceVisibility: 'hidden',
-    shadowColor: '#781408',
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.34,
-    shadowRadius: 26,
   },
 })

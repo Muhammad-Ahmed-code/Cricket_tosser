@@ -17,9 +17,22 @@ type WeatherData = {
 
 type Props = {
   weather?: WeatherData | null
+  generatedAt?: string | null
 }
 
-export default function WeatherStrip({ weather }: Props) {
+function formatGeneratedAt(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  if (diffMs < 120_000) return 'just now'
+  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)} min ago`
+  const sameDay = d.toDateString() === now.toDateString()
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  if (sameDay) return time
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) + ', ' + time
+}
+
+export default function WeatherStrip({ weather, generatedAt }: Props) {
   if (!weather) return null
 
   const rainPct = weather.rain_probability_percent ?? 0
@@ -40,6 +53,11 @@ export default function WeatherStrip({ weather }: Props) {
 
   return (
     <View style={styles.container}>
+      {generatedAt && (
+        <Text style={styles.generatedLabel}>
+          Generated: {formatGeneratedAt(generatedAt)}
+        </Text>
+      )}
       {weather.match_likely_affected && (
         <View style={styles.rainBanner}>
           <Text style={styles.rainBannerText}>
@@ -74,6 +92,13 @@ export default function WeatherStrip({ weather }: Props) {
 const styles = StyleSheet.create({
   container: {
     marginBottom: 10,
+  },
+  generatedLabel: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: theme.textSecondary,
+    marginBottom: 6,
+    letterSpacing: 0.3,
   },
   rainBanner: {
     backgroundColor: '#FFF8E7',

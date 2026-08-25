@@ -240,6 +240,18 @@ const drawerSt = StyleSheet.create({
   footText: { fontSize: 12, fontWeight: '500', color: '#9AA18C' },
 })
 
+function formatReportDate(iso: string | null): string {
+  if (!iso) return 'just now'
+  const d = new Date(iso)
+  const diffMs = Date.now() - d.getTime()
+  if (diffMs < 120_000) return 'just now'
+  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)} min ago`
+  const sameDay = d.toDateString() === new Date().toDateString()
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  if (sameDay) return `today, ${time}`
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 function getConfidencePct(confidence: string, confidencePct?: number): number {
   if (confidencePct && confidencePct >= 50 && confidencePct <= 95) {
     return confidencePct
@@ -375,13 +387,19 @@ function buildMatchSummary(data: {
   return 'Your match result has been saved'
 }
 
+const PHOTO_LABELS = ['END·A', 'END·B', 'CLOSE-UP·01', 'CLOSE-UP·02']
+
 export default function ReportScreen({ route, navigation }: Props) {
-  const { result, teamResult, groundName, overs, squad, reportId, scrollToToss, scrollToMatch } = route.params
+  const { result, teamResult, groundName, overs, squad, reportId, scrollToToss, scrollToMatch, photoUris } = route.params
   const { isSignedIn, userId } = useAuth()
   const supabase = useSupabaseClient()
   const { isOffline } = useContext(OfflineContext)
   const insets = useSafeAreaInsets()
   const [drawerOpen, setDrawerOpen] = useState(false)
+
+  // Pitch photo lightbox
+  const [lightboxUri, setLightboxUri] = useState<string | null>(null)
+  const [lightboxLabel, setLightboxLabel] = useState('')
 
   // Toss report (Stage 1) state
   const [tossWon, setTossWon] = useState<'yes' | 'no' | null>(null)
@@ -647,9 +665,11 @@ export default function ReportScreen({ route, navigation }: Props) {
     }
   }
 
-  // Normalise: result may be raw API response ({ prediction, weather }) or the old flat format
+  // Normalise: result may be raw API response ({ prediction, weather }) or the old flat format.
+  // Prefer weather_snapshot (explicit generation-time snapshot) with fallback to weather.
   const prediction = result?.prediction ?? {}
-  const weather = result?.weather ?? {}
+  const weather = result?.weather_snapshot ?? result?.weather ?? {}
+  const generated_at: string | null = result?.generated_at ?? null
 
   // Sticky CTA bars
   const scrollYRef = useRef(0)
@@ -728,6 +748,7 @@ export default function ReportScreen({ route, navigation }: Props) {
     behaviour,
     par_score_min,
     par_score_max,
+    toss_reasoning_summary,
     toss_reasoning,
     selection_tip,
     weather_impact,
@@ -748,6 +769,8 @@ export default function ReportScreen({ route, navigation }: Props) {
     drying_out,
     forecast_afternoon_temp,
   } = weather
+
+  const tossReasoningDisplay = toss_reasoning_summary ?? toss_reasoning
 
   const tossLabel = toss_decision === 'bat' ? 'Bat first' : 'Bowl first'
 
@@ -771,7 +794,7 @@ export default function ReportScreen({ route, navigation }: Props) {
         `Toss: ${tossLabel} (${confidence} confidence)\n` +
         `Par score: ${par_score_min}–${par_score_max} (${overs} overs)\n` +
         `Conditions: ${conditions}, ${temp_celsius}°C\n` +
-        `${toss_reasoning}\n` +
+        `${tossReasoningDisplay}\n` +
         `Powered by PitchReader 🏏`,
     })
   }
@@ -905,11 +928,11 @@ export default function ReportScreen({ route, navigation }: Props) {
         {/* Match metadata */}
         <View style={styles.matchMeta}>
           <Text style={styles.matchMetaLocation} numberOfLines={1}>{groundName}</Text>
-          <Text style={styles.matchMetaDetails}>{overs} ov · just now</Text>
+          <Text style={styles.matchMetaDetails}>{overs} ov · {formatReportDate(generated_at)}</Text>
         </View>
 
         {/* Weather strip — shared across both tabs */}
-        <WeatherStrip weather={weather} />
+        <WeatherStrip weather={weather} generatedAt={generated_at} />
 
         {activeTab === 'general' ? (
           <>
@@ -918,7 +941,7 @@ export default function ReportScreen({ route, navigation }: Props) {
               style={styles.heroCard}
               activeOpacity={0.85}
               onPress={() => openModal(
-                'Toss decision', toss_reasoning, '🪙',
+                'Toss decision', tossReasoningDisplay, '🪙',
                 "The toss is one of the most important decisions in cricket. On a seam-friendly morning pitch, bowling first lets your seamers exploit conditions before the pitch flattens. On a batting track, batting first sets a target and avoids second innings pressure. Always factor in your team's strengths — if your best bowlers are seamers, a green pitch is gold."
               )}
             >
@@ -929,7 +952,7 @@ export default function ReportScreen({ route, navigation }: Props) {
                   <Text style={styles.heroChevron}>❯</Text>
                 </View>
               </View>
-              <Text style={styles.heroReasoning}>{toss_reasoning}</Text>
+              <Text style={styles.heroReasoning}>{tossReasoningDisplay}</Text>
               <View style={styles.confidencePill}>
                 <Text style={styles.confidenceText}>{confidenceLabel}</Text>
               </View>
@@ -1061,6 +1084,33 @@ export default function ReportScreen({ route, navigation }: Props) {
               ))}
             </TouchableOpacity>
 
+            {/* Pitch photos — 2×2 grid */}
+            {photoUris && photoUris.length > 0 && (
+              <View style={[styles.card, styles.blockCard]}>
+                <Text style={styles.cardSectionLabel}>PITCH PHOTOS</Text>
+                <View style={styles.photoGrid}>
+                  {Array.from({ length: Math.ceil(photoUris.length / 2) }, (_, row) => (
+                    <View key={row} style={styles.photoRow}>
+                      {photoUris.slice(row * 2, row * 2 + 2).map((uri, col) => {
+                        const idx = row * 2 + col
+                        return (
+                          <TouchableOpacity
+                            key={idx}
+                            style={styles.photoCell}
+                            onPress={() => { setLightboxUri(uri); setLightboxLabel(PHOTO_LABELS[idx] ?? `Photo ${idx + 1}`) }}
+                            activeOpacity={0.85}
+                          >
+                            <Image source={{ uri }} style={styles.photoThumb} resizeMode="cover" />
+                            <Text style={styles.photoLabel}>{PHOTO_LABELS[idx] ?? `Photo ${idx + 1}`}</Text>
+                          </TouchableOpacity>
+                        )
+                      })}
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
             {/* Squad card */}
             {squad_rating !== null && squad_rating !== undefined && (
               <TouchableOpacity
@@ -1152,6 +1202,39 @@ export default function ReportScreen({ route, navigation }: Props) {
               confidence={teamResult?.confidence}
               confidencePct={teamResult?.confidence_pct}
             />
+
+            {/* Squad composition card — shows what was sent to the AI */}
+            {squad && (
+              <View style={[styles.card, styles.blockCard, styles.squadCompCard]}>
+                <Text style={styles.cardSectionLabel}>YOUR SQUAD</Text>
+                <View style={styles.squadCompDivider} />
+                {[
+                  { label: 'Batters',           count: squad.batters },
+                  { label: 'Seam all-rounders', count: squad.fastAllRounders },
+                  { label: 'Seamers',           count: squad.seamers },
+                  { label: 'Spin all-rounders', count: squad.spinAllRounders },
+                  { label: 'Spinners',          count: squad.spinners },
+                ].map(({ label, count }, i, arr) => (
+                  <View
+                    key={label}
+                    style={[
+                      styles.squadCompRow,
+                      i < arr.length - 1 && styles.squadCompRowBorder,
+                    ]}
+                  >
+                    <Text style={styles.squadCompLabel}>{label}</Text>
+                    <Text style={styles.squadCompCount}>{count}</Text>
+                  </View>
+                ))}
+                <View style={styles.squadCompDivider} />
+                <View style={styles.squadCompRow}>
+                  <Text style={[styles.squadCompLabel, styles.squadCompTotalLabel]}>Total</Text>
+                  <Text style={[styles.squadCompCount, styles.squadCompTotalCount]}>
+                    {squad.batters + squad.fastAllRounders + squad.spinAllRounders + squad.seamers + squad.spinners}
+                  </Text>
+                </View>
+              </View>
+            )}
 
             {/* Squad summary card */}
             <View style={[styles.card, styles.blockCard]}>
@@ -1412,6 +1495,28 @@ export default function ReportScreen({ route, navigation }: Props) {
         )}
 
       </ScrollView>
+
+      {/* Photo lightbox */}
+      <Modal
+        visible={lightboxUri !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLightboxUri(null)}
+        statusBarTranslucent
+      >
+        <Pressable style={styles.lightboxOverlay} onPress={() => setLightboxUri(null)}>
+          <View style={styles.lightboxInner}>
+            {lightboxUri && (
+              <Image
+                source={{ uri: lightboxUri }}
+                style={styles.lightboxImage}
+                resizeMode="contain"
+              />
+            )}
+            <Text style={styles.lightboxLabel}>{lightboxLabel}</Text>
+          </View>
+        </Pressable>
+      </Modal>
 
       {/* Sticky toss CTA bar */}
       {!!reportId && !tossReportCompleted && (
@@ -1760,6 +1865,57 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
+  // Pitch photos
+  photoGrid: {
+    marginTop: 10,
+    gap: 8,
+  },
+  photoRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  photoCell: {
+    flex: 1,
+    gap: 4,
+  },
+  photoThumb: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    borderRadius: 10,
+    backgroundColor: theme.line,
+  },
+  photoLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.6,
+    color: theme.textSecondary,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  lightboxOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lightboxInner: {
+    width: SW,
+    alignItems: 'center',
+    gap: 14,
+  },
+  lightboxImage: {
+    width: SW,
+    height: SW * 0.75,
+  },
+  lightboxLabel: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    opacity: 0.8,
+  },
+
   // Drying card
   dryingCard: {
     backgroundColor: '#FFF3CD',
@@ -1878,6 +2034,44 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 8,
+  },
+
+  // Squad composition card (My Team tab)
+  squadCompCard: {
+    marginBottom: 8,
+  },
+  squadCompDivider: {
+    height: 1,
+    backgroundColor: '#D8D4C5',
+    marginVertical: 10,
+  },
+  squadCompRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  squadCompRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#EDEBE2',
+  },
+  squadCompLabel: {
+    fontSize: 13,
+    color: '#52624A',
+  },
+  squadCompCount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#104020',
+  },
+  squadCompTotalLabel: {
+    fontWeight: '700',
+    color: '#104020',
+  },
+  squadCompTotalCount: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#104020',
   },
 
   // Role tips

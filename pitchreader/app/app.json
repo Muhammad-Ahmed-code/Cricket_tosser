@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cricket Tosser",
     "slug": "cricket-tosser",
-    "version": "2.4.0",
+    "version": "2.14.0",
     "scheme": "cricket-tosser",
     "orientation": "portrait",
     "icon": "./assets/images/APP_ICON_MAIN_WITH_BORDERS.png",
@@ -14,7 +14,11 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.crickettosser.app"
+      "bundleIdentifier": "com.crickettosser.app",
+      "deploymentTarget": "16.4",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "splash": {
@@ -26,7 +30,7 @@
         "backgroundColor": "#a8331f"
       },
       "package": "com.crickettosser.app",
-      "versionCode": 6,
+      "versionCode": 15,
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "intentFilters": [
@@ -38,19 +42,25 @@
               "scheme": "cricket-tosser"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ],
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.SCHEDULE_EXACT_ALARM",
-        "android.permission.USE_EXACT_ALARM"
+        "android.permission.RECORD_AUDIO"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION"
       ]
     },
     "web": {
@@ -83,10 +93,13 @@
         {
           "photosPermission": "Cricket Tosser needs access to your photos to select pitch photos.",
           "savePhotosPermission": "Cricket Tosser needs access to save photos.",
-          "isAccessMediaLocationEnabled": true,
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": [],
           "microphone": false
         }
       ],
+      "expo-file-system",
+      "./plugins/scopeLegacyStoragePermissions",
       [
         "expo-camera",
         {

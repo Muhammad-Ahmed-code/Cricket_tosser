@@ -73,9 +73,6 @@ export default function SplashScreenView({ onFinish, onReady }: Props) {
   const loaderOpacity  = useRef(new Animated.Value(0)).current
   const loaderTransY   = useRef(new Animated.Value(14)).current
 
-  // Post-landing reveal
-  const haloOpacity    = useRef(new Animated.Value(0)).current
-
   // Full-screen fade-out
   const screenOpacity  = useRef(new Animated.Value(1)).current
 
@@ -142,10 +139,6 @@ export default function SplashScreenView({ onFinish, onReady }: Props) {
     return () => { clearTimeout(tFade); clearTimeout(tNav) }
   }, [pct])
 
-  const handleLanded = () => {
-    Animated.timing(haloOpacity, { toValue: 1, duration: 700, easing: Easing.ease, useNativeDriver: true }).start()
-  }
-
   if (!fontsLoaded) return <View style={styles.wait} />
 
   return (
@@ -187,18 +180,16 @@ export default function SplashScreenView({ onFinish, onReady }: Props) {
       <View style={styles.heroOuter}>
         <View style={styles.heroInner}>
 
-          {/* Halo rings — fade in after coin lands */}
-          <Animated.View style={[StyleSheet.absoluteFill, { opacity: haloOpacity }]}>
+          {/* Ring border around coin */}
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
             <Svg width={240} height={240} viewBox="0 0 240 240">
               <Circle cx="120" cy="120" r="118" fill="none" stroke={T.inkFaint} strokeWidth="1" />
-              <Circle cx="120" cy="120" r="100" fill="none"
-                stroke="rgba(168,51,31,0.18)" strokeWidth="1" strokeDasharray="2 6" />
             </Svg>
-          </Animated.View>
+          </View>
 
           {/* Coin: 206px centered in 240px box → offset (240-206)/2 = 17 */}
           <View style={styles.coinPos}>
-            <Coin size={206} onLanded={handleLanded} />
+            <Coin size={206} />
           </View>
 
         </View>

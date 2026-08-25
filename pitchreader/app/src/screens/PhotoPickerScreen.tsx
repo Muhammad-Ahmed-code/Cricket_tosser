@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import {
   View, Text, TouchableOpacity, FlatList, Image,
-  StyleSheet, Dimensions, Alert, ActivityIndicator,
+  StyleSheet, Dimensions, Alert, ActivityIndicator, Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import * as MediaLibrary from 'expo-media-library'
@@ -25,11 +25,8 @@ const SLOT_INSTRUCTIONS = [
 const { width } = Dimensions.get('window')
 const THUMB = Math.floor((width - 4) / 3)
 
-// iOS-only cache: ph:// → file:// conversions (used during selection)
-const localUriCache: Record<string, string> = {}
-
-// Separate cache for thumbnail display URIs (getAssetInfoAsync results)
-const thumbUriCache: Record<string, string> = {}
+// Cache asset.id → resolved file:// URI so we don't re-fetch on every render
+const uriCache: Record<string, string> = {}
 
 interface AssetThumbnailProps {
   asset: MediaLibrary.Asset
@@ -38,20 +35,17 @@ interface AssetThumbnailProps {
 
 function AssetThumbnail({ asset, size }: AssetThumbnailProps) {
   const [localUri, setLocalUri] = useState<string | null>(
-    thumbUriCache[asset.id] ?? null
+    uriCache[asset.id] ?? null
   )
 
   useEffect(() => {
     if (localUri) return
     let cancelled = false
-    MediaLibrary.getAssetInfoAsync(asset)
-      .then(info => {
+    asset.getUri()
+      .then(uri => {
         if (cancelled) return
-        const uri = info.localUri ?? null
-        if (uri) {
-          thumbUriCache[asset.id] = uri
-          setLocalUri(uri)
-        }
+        uriCache[asset.id] = uri
+        setLocalUri(uri)
       })
       .catch(() => {})
     return () => { cancelled = true }
@@ -77,9 +71,9 @@ function IOSPhotoPicker({ navigation, route }: Props) {
   const { slotIndex } = route.params
   const [assets, setAssets] = useState<MediaLibrary.Asset[]>([])
   const [hasNextPage, setHasNextPage] = useState(false)
-  const [endCursor, setEndCursor] = useState<string | undefined>()
+  const [offset, setOffset] = useState(0)
   const [permissionDenied, setPermissionDenied] = useState(false)
-  const [compressingUri, setCompressingUri] = useState<string | null>(null)
+  const [compressingId, setCompressingId] = useState<string | null>(null)
   const [usedUris, setUsedUris] = useState<(string | null)[]>(photoStore.getUris())
 
   useEffect(() => {
@@ -88,10 +82,10 @@ function IOSPhotoPicker({ navigation, route }: Props) {
   }, [])
 
   useEffect(() => {
-    loadPhotos()
+    loadPhotos(0)
   }, [])
 
-  async function loadPhotos(cursor?: string) {
+  async function loadPhotos(currentOffset: number) {
     const { status } = await MediaLibrary.requestPermissionsAsync()
     console.log('[PhotoPicker] Platform:', Platform.OS)
     console.log('[PhotoPicker] Permission status:', status)
@@ -101,62 +95,49 @@ function IOSPhotoPicker({ navigation, route }: Props) {
       return
     }
 
-    const result = await MediaLibrary.getAssetsAsync({
-      mediaType: MediaLibrary.MediaType.photo,
-      sortBy: MediaLibrary.SortBy.creationTime,
-      first: 60,
-      after: cursor,
-    })
+    const batch = await new MediaLibrary.Query()
+      .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
+      .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: false })
+      .limit(60)
+      .offset(currentOffset)
+      .exe()
 
-    console.log('[PhotoPicker] Assets loaded:', result.assets.length)
-    if (result.assets[0]) {
-      console.log('[PhotoPicker] First asset:', JSON.stringify(result.assets[0]))
-    }
+    console.log('[PhotoPicker] Assets loaded:', batch.length)
 
-    setHasNextPage(result.hasNextPage)
-    setEndCursor(result.endCursor)
-    setAssets(prev => cursor ? [...prev, ...result.assets] : result.assets)
+    const newOffset = currentOffset + batch.length
+    setOffset(newOffset)
+    setHasNextPage(batch.length === 60)
+    setAssets(prev => currentOffset === 0 ? batch : [...prev, ...batch])
   }
 
   async function handleSelect(asset: MediaLibrary.Asset) {
-    if (compressingUri) return
+    if (compressingId) return
 
-    const usedSlot = usedUris.indexOf(asset.uri)
+    const usedSlot = usedUris.indexOf(asset.id)
     if (usedSlot !== -1 && usedSlot !== slotIndex) {
       Alert.alert('Already used', `This photo is already used for ${SLOT_LABELS[usedSlot]}`)
       return
     }
 
-    setCompressingUri(asset.uri)
+    setCompressingId(asset.id)
     try {
-      // Copy the ph:// asset into the app's own cache via EXFileSystemAssetLibraryHandler,
-      // which uses PHImageManager directly (no RCT bridge image-editing path).
-      // A file:// URI inside our own cache is safe for expo-image-manipulator regardless
-      // of which compiled native version is in the installed dev client.
       let fileUri: string
-      if (localUriCache[asset.id]) {
-        fileUri = localUriCache[asset.id]
+      if (uriCache[asset.id]) {
+        fileUri = uriCache[asset.id]
       } else {
-        let sourceUri: string | null = thumbUriCache[asset.id] ?? null
-        if (!sourceUri) {
-          const info = await MediaLibrary.getAssetInfoAsync(asset)
-          sourceUri = info.localUri ?? null
-          if (sourceUri) thumbUriCache[asset.id] = sourceUri
-        }
-        if (!sourceUri) throw new Error(`Could not resolve local URI for asset ${asset.id}`)
-        fileUri = sourceUri
-        localUriCache[asset.id] = fileUri
+        fileUri = await asset.getUri()
+        uriCache[asset.id] = fileUri
       }
 
       console.log('[PhotoPicker] Compressing URI:', fileUri.substring(0, 60))
       const compressed = await compressImage(fileUri)
-      photoStore.setPhoto(slotIndex, compressed, asset.uri)
+      photoStore.setPhoto(slotIndex, compressed, asset.id)
       navigation.navigate('Home')
     } catch (e) {
       console.error('[PhotoPicker] Compress error:', e)
       Alert.alert('Error', 'Could not load photo. Please try again.')
     } finally {
-      setCompressingUri(null)
+      setCompressingId(null)
     }
   }
 
@@ -223,11 +204,10 @@ function IOSPhotoPicker({ navigation, route }: Props) {
         windowSize={10}
         removeClippedSubviews={false}
         renderItem={({ item }) => {
-          console.log('[PhotoPicker] Asset URI:', item.uri.substring(0, 30))
-          const usedSlot = usedUris.indexOf(item.uri)
+          const usedSlot = usedUris.indexOf(item.id)
           const isUsedOther = usedSlot !== -1 && usedSlot !== slotIndex
           const isCurrentSlot = usedSlot === slotIndex
-          const isCompressing = compressingUri === item.uri
+          const isCompressing = compressingId === item.id
 
           return (
             <TouchableOpacity
@@ -237,21 +217,21 @@ function IOSPhotoPicker({ navigation, route }: Props) {
             >
               <AssetThumbnail asset={item} size={THUMB} />
               {isUsedOther && (
-                <View style={[StyleSheet.absoluteFillObject, styles.usedOverlay]}>
+                <View style={[StyleSheet.absoluteFill, styles.usedOverlay]}>
                   <View style={styles.slotBadge}>
                     <Text style={styles.slotBadgeText}>{SLOT_LABELS[usedSlot]}</Text>
                   </View>
                 </View>
               )}
               {isCurrentSlot && (
-                <View style={[StyleSheet.absoluteFillObject, styles.currentOverlay]}>
+                <View style={[StyleSheet.absoluteFill, styles.currentOverlay]}>
                   <View style={styles.currentBadge}>
                     <Text style={styles.currentBadgeText}>Current</Text>
                   </View>
                 </View>
               )}
               {isCompressing && (
-                <View style={[StyleSheet.absoluteFillObject, styles.compressingOverlay]}>
+                <View style={[StyleSheet.absoluteFill, styles.compressingOverlay]}>
                   <ActivityIndicator color="#fff" />
                 </View>
               )}
@@ -262,7 +242,7 @@ function IOSPhotoPicker({ navigation, route }: Props) {
           hasNextPage ? (
             <TouchableOpacity
               style={styles.loadMore}
-              onPress={() => loadPhotos(endCursor)}
+              onPress={() => loadPhotos(offset)}
             >
               <Text style={styles.loadMoreText}>Load more</Text>
             </TouchableOpacity>

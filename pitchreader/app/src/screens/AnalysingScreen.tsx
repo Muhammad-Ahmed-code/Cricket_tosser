@@ -235,15 +235,18 @@ export default function AnalysingScreen({ route, navigation }: Props) {
       return
     }
 
-    // Steps spread across full ~22s analysis duration
-    const t1 = setTimeout(() => setStepStates(['done', 'active',   'pending', 'pending', 'pending', 'pending']),  3000)
-    const t2 = setTimeout(() => setStepStates(['done', 'done',     'active',  'pending', 'pending', 'pending']),  7000)
-    const t3 = setTimeout(() => setStepStates(['done', 'done',     'done',    'active',  'pending', 'pending']), 11000)
-    const t4 = setTimeout(() => setStepStates(['done', 'done',     'done',    'done',    'active',  'pending']), 14000)
-    const t5 = setTimeout(() => setStepStates(['done', 'done',     'done',    'done',    'done',    'active'  ]), 17000)
+    // Squad adds ~14s to inference (avg measured terse: no-squad ~28s, with-squad ~42s)
+    const hasSquad = !!squad
+    const EXPECTED_DURATION_MS = hasSquad ? 45000 : 30000
+
+    // Steps spread proportionally across expected duration
+    const t1 = setTimeout(() => setStepStates(['done', 'active',   'pending', 'pending', 'pending', 'pending']), hasSquad ?  6000 :  4000)
+    const t2 = setTimeout(() => setStepStates(['done', 'done',     'active',  'pending', 'pending', 'pending']), hasSquad ? 12000 :  8000)
+    const t3 = setTimeout(() => setStepStates(['done', 'done',     'done',    'active',  'pending', 'pending']), hasSquad ? 19000 : 13000)
+    const t4 = setTimeout(() => setStepStates(['done', 'done',     'done',    'done',    'active',  'pending']), hasSquad ? 27000 : 18000)
+    const t5 = setTimeout(() => setStepStates(['done', 'done',     'done',    'done',    'done',    'active'  ]), hasSquad ? 36000 : 24000)
 
     // Progress: increment evenly to 95% over expected duration, never freeze
-    const EXPECTED_DURATION_MS = 22000
     const INTERVAL_MS = 200
     const progressIncrement = 95 / (EXPECTED_DURATION_MS / INTERVAL_MS)
     const analysisStart = Date.now()
@@ -252,13 +255,23 @@ export default function AnalysingScreen({ route, navigation }: Props) {
       const elapsed = Date.now() - analysisStart
       currentPct = Math.min(95, currentPct + progressIncrement)
       progressAnim.setValue(currentPct)
-      if      (elapsed <  2000) setStatusMessage('Reading your pitch photos...')
-      else if (elapsed <  5000) setStatusMessage('Checking live weather conditions...')
-      else if (elapsed <  9000) setStatusMessage('Analysing surface texture and wear...')
-      else if (elapsed < 13000) setStatusMessage('Calculating pitch behaviour by phase...')
-      else if (elapsed < 17000) setStatusMessage("Building your captain's report...")
-      else if (elapsed < 21000) setStatusMessage('Adding final recommendations...')
-      else                       setStatusMessage('Almost ready...')
+      if (hasSquad) {
+        if      (elapsed <  5000) setStatusMessage('Reading your pitch photos...')
+        else if (elapsed < 10000) setStatusMessage('Checking live weather conditions...')
+        else if (elapsed < 18000) setStatusMessage('Analysing surface texture and wear...')
+        else if (elapsed < 27000) setStatusMessage('Calculating pitch behaviour by phase...')
+        else if (elapsed < 36000) setStatusMessage("Building your captain's report...")
+        else if (elapsed < 43000) setStatusMessage('Adding final recommendations...')
+        else                       setStatusMessage('Almost ready...')
+      } else {
+        if      (elapsed <  3000) setStatusMessage('Reading your pitch photos...')
+        else if (elapsed <  7000) setStatusMessage('Checking live weather conditions...')
+        else if (elapsed < 12000) setStatusMessage('Analysing surface texture and wear...')
+        else if (elapsed < 18000) setStatusMessage('Calculating pitch behaviour by phase...')
+        else if (elapsed < 25000) setStatusMessage("Building your captain's report...")
+        else if (elapsed < 29000) setStatusMessage('Adding final recommendations...')
+        else                       setStatusMessage('Almost ready...')
+      }
     }, INTERVAL_MS)
 
     ;(async () => {
@@ -289,13 +302,18 @@ export default function AnalysingScreen({ route, navigation }: Props) {
         const reportId: string = result?.reportId ?? clientReportId
 
         reportHistoryStore.save({
-          id:           reportId ?? `local_${Date.now()}`,
-          ground_name:  groundName,
+          id:              reportId ?? `local_${Date.now()}`,
+          ground_name:     groundName,
           overs,
-          match_date:   new Date().toISOString().split('T')[0],
-          created_at:   new Date().toISOString(),
-          prediction:   general,
-          weather:      result?.weather ?? {},
+          match_date:      new Date().toISOString().split('T')[0],
+          created_at:      new Date().toISOString(),
+          prediction:      general,
+          weather:         result?.weather ?? {},
+          weather_snapshot: result?.weather_snapshot ?? null,
+          generated_at:    result?.generated_at ?? new Date().toISOString(),
+          team_prediction: teamResult ?? null,
+          squad:           squad ?? null,
+          photo_urls:      photos.map(b => `data:image/jpeg;base64,${b}`),
         }).then(() => {
           scheduleReminderNotification(reportId, groundName)
         }).catch(() => {})
@@ -311,10 +329,17 @@ export default function AnalysingScreen({ route, navigation }: Props) {
           photo_count: photos.length,
           squad_entered: !!squad,
           has_weather: !!(result?.weather && Object.keys(result.weather).length > 0),
+          reports_used: usageStore.getReportCount(),
         })
 
-        const reportResult = { prediction: general, weather: result?.weather ?? {} }
-        setTimeout(() => navigation.replace('Report', { result: reportResult, teamResult, groundName, overs, squad, reportId }), 350)
+        const photoUris = photos.map(b => `data:image/jpeg;base64,${b}`)
+        const reportResult = {
+          prediction:      general,
+          weather:         result?.weather ?? {},
+          weather_snapshot: result?.weather_snapshot ?? null,
+          generated_at:    result?.generated_at ?? new Date().toISOString(),
+        }
+        setTimeout(() => navigation.replace('Report', { result: reportResult, teamResult, groundName, overs, squad, reportId, photoUris }), 350)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Something went wrong')
       }

@@ -240,7 +240,7 @@ export default function PaywallScreen({ navigation, route }: Props) {
                   setPromoStatus('idle')
                 }
               }}
-              placeholder="Enter code e.g. HITFORSIX"
+              placeholder="Enter discount code"
               placeholderTextColor={C.dimText}
               autoCapitalize="characters"
               autoCorrect={false}

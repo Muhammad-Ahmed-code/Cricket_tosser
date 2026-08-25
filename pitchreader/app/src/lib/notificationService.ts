@@ -83,7 +83,11 @@ export interface InAppReminderData {
   groundName: string
   prediction: Record<string, unknown>
   weather: Record<string, unknown>
+  weather_snapshot?: Record<string, unknown> | null
+  generated_at?: string | null
+  team_prediction?: Record<string, unknown> | null
   overs: number
+  photo_urls?: string[] | null
 }
 
 export async function checkShouldShowInAppReminder(): Promise<
@@ -118,6 +122,9 @@ export async function checkShouldShowInAppReminder(): Promise<
       groundName: candidate.ground_name,
       prediction: candidate.prediction,
       weather: candidate.weather,
+      weather_snapshot: candidate.weather_snapshot ?? null,
+      generated_at: candidate.generated_at ?? candidate.created_at,
+      team_prediction: candidate.team_prediction ?? null,
       overs: candidate.overs,
     }
   } catch {
@@ -181,7 +188,11 @@ export interface InAppMatchReminderData {
   groundName: string
   prediction: Record<string, unknown>
   weather: Record<string, unknown>
+  weather_snapshot?: Record<string, unknown> | null
+  generated_at?: string | null
+  team_prediction?: Record<string, unknown> | null
   overs: number
+  photo_urls?: string[] | null
 }
 
 export async function checkShouldShowMatchReminder(): Promise<
@@ -215,7 +226,11 @@ export async function checkShouldShowMatchReminder(): Promise<
       groundName: candidate.ground_name,
       prediction: candidate.prediction,
       weather: candidate.weather,
+      weather_snapshot: candidate.weather_snapshot ?? null,
+      generated_at: candidate.generated_at ?? candidate.created_at,
+      team_prediction: candidate.team_prediction ?? null,
       overs: candidate.overs,
+      photo_urls: candidate.photo_urls ?? null,
     }
   } catch {
     return { show: false }

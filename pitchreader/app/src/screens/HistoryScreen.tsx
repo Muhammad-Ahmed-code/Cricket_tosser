@@ -246,6 +246,11 @@ interface ReportRow {
   created_at: string
   prediction: Record<string, unknown>
   weather: Record<string, unknown>
+  weather_snapshot?: Record<string, unknown> | null
+  generated_at?: string | null
+  team_prediction?: Record<string, unknown> | null
+  squad?: { seamers: number; fastAllRounders: number; spinners: number; spinAllRounders: number; batters: number } | null
+  photo_urls?: string[] | null
   reviews: ReviewSummary[]
   toss_completed?: boolean
   match_completed?: boolean
@@ -279,7 +284,7 @@ export default function HistoryScreen({ navigation }: Props) {
         try {
           const { data } = await supabase
             .from('reports')
-            .select('id, ground_name, overs, match_date, created_at, prediction, weather, reviews(id, toss_report_completed, match_won, pitch_rating)')
+            .select('id, ground_name, overs, match_date, created_at, prediction, weather, weather_snapshot, generated_at, team_prediction, photo_urls, reviews(id, toss_report_completed, match_won, pitch_rating)')
             .order('created_at', { ascending: false })
             .limit(50)
 
@@ -288,9 +293,14 @@ export default function HistoryScreen({ navigation }: Props) {
             const localIds = new Set(localRows.map(r => r.id))
 
             // Local rows enriched with Supabase reviews where available
-            const enriched = localRows.map(local =>
-              supabaseMap.has(local.id) ? (supabaseMap.get(local.id) as ReportRow) : local
-            )
+            // Prefer local photo_urls (data URIs) when Supabase hasn't finished async PATCH yet
+            const enriched = localRows.map(local => {
+              if (supabaseMap.has(local.id)) {
+                const remote = supabaseMap.get(local.id) as ReportRow
+                return { ...remote, photo_urls: remote.photo_urls ?? local.photo_urls }
+              }
+              return local
+            })
             // Supabase rows not in local (e.g. from another device)
             const remoteOnly = (data as ReportRow[]).filter(r => !localIds.has(r.id))
 
@@ -316,35 +326,41 @@ export default function HistoryScreen({ navigation }: Props) {
 
   const handleCardPress = (report: ReportRow) => {
     navigation.navigate('Report', {
-      result: { prediction: report.prediction, weather: report.weather },
+      result: { prediction: report.prediction, weather: report.weather, weather_snapshot: report.weather_snapshot ?? null, generated_at: report.generated_at ?? report.created_at },
+      teamResult: report.team_prediction ?? undefined,
       groundName: report.ground_name,
       overs: report.overs,
-      squad: null,
+      squad: report.squad ?? null,
       reportId: report.id.startsWith('local_') ? undefined : report.id,
+      photoUris: report.photo_urls ?? undefined,
     })
   }
 
   const handleAddToss = (report: ReportRow) => {
     track('history_stage_tapped', { stage: 'toss', report_id: report.id })
     navigation.navigate('Report', {
-      result: { prediction: report.prediction, weather: report.weather },
+      result: { prediction: report.prediction, weather: report.weather, weather_snapshot: report.weather_snapshot ?? null, generated_at: report.generated_at ?? report.created_at },
+      teamResult: report.team_prediction ?? undefined,
       groundName: report.ground_name,
       overs: report.overs,
-      squad: null,
+      squad: report.squad ?? null,
       reportId: report.id.startsWith('local_') ? undefined : report.id,
       scrollToToss: true,
+      photoUris: report.photo_urls ?? undefined,
     })
   }
 
   const handleAddMatch = (report: ReportRow) => {
     track('history_stage_tapped', { stage: 'match', report_id: report.id })
     navigation.navigate('Report', {
-      result: { prediction: report.prediction, weather: report.weather },
+      result: { prediction: report.prediction, weather: report.weather, weather_snapshot: report.weather_snapshot ?? null, generated_at: report.generated_at ?? report.created_at },
+      teamResult: report.team_prediction ?? undefined,
       groundName: report.ground_name,
       overs: report.overs,
-      squad: null,
+      squad: report.squad ?? null,
       reportId: report.id.startsWith('local_') ? undefined : report.id,
       scrollToMatch: true,
+      photoUris: report.photo_urls ?? undefined,
     })
   }
 

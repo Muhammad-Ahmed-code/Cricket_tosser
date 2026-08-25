@@ -20,6 +20,78 @@ const photoLabels = [
   "Photo 4 of 4 - Close-up of good length area",
 ];
 
+// --- Retry helper for Anthropic API calls ---
+
+const CLAUDE_RETRYABLE_STATUSES = new Set([500, 503, 529]);
+
+async function callClaudeWithRetry(
+  apiKey: string,
+  requestBody: string,
+  retryLog: Array<{ status: number; msg: string }>,
+): Promise<{ data: any; attempts: number }> {
+  let lastErr: Error = new Error("unreachable");
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (attempt > 1) await new Promise(r => setTimeout(r, (attempt - 1) * 1000));
+
+    let res: Response;
+    let data: any;
+    try {
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: requestBody,
+      });
+      data = await res.json();
+    } catch (e) {
+      lastErr = e as Error;
+      retryLog.push({ status: 0, msg: lastErr.message });
+      continue;
+    }
+
+    if (res.ok) return { data, attempts: attempt };
+
+    const errMsg = `HTTP ${res.status}: ${data?.error?.message ?? "unknown"}`;
+    if (!CLAUDE_RETRYABLE_STATUSES.has(res.status)) {
+      throw new Error(`Claude API error ${errMsg}`);
+    }
+    lastErr = new Error(`Claude API error ${errMsg}`);
+    retryLog.push({ status: res.status, msg: errMsg });
+  }
+
+  throw lastErr;
+}
+
+// Fire-and-forget insert into analysis_errors — never blocks the response.
+function logClaudeError(params: {
+  requestId: string;
+  supabaseUrl: string;
+  supabaseKey: string;
+  userId: string | null;
+  groundName: string;
+  statusCode: number;
+  attemptCount: number;
+  errorMessage: string;
+}): void {
+  const { requestId, supabaseUrl, supabaseKey, userId, groundName, statusCode, attemptCount, errorMessage } = params;
+  fetch(`${supabaseUrl}/rest/v1/analysis_errors`, {
+    method: "POST",
+    headers: {
+      "apikey": supabaseKey,
+      "Authorization": `Bearer ${supabaseKey}`,
+      "Content-Type": "application/json",
+      "Prefer": "return=minimal",
+    },
+    body: JSON.stringify({ user_id: userId, ground_name: groundName, status_code: statusCode, attempt_count: attemptCount, error_message: errorMessage }),
+  })
+    .then(r => { if (!r.ok) r.text().then(t => console.warn(`[${requestId}] analysis_errors insert failed (${r.status}): ${t.slice(0, 100)}`)); })
+    .catch(e => console.warn(`[${requestId}] analysis_errors insert error:`, (e as Error).message));
+}
+
 function mapWeatherCode(code: number): string {
   if (code <= 1) return "sunny";
   if (code <= 3) return "cloudy";
@@ -165,6 +237,10 @@ serve(async (req) => {
       console.log(`[${requestId}] Weather computed:`, JSON.stringify(weather));
     }
 
+    // --- Step 2b: Build weather snapshot with generation timestamp ---
+    const generated_at = new Date().toISOString()
+    const weather_snapshot = { ...weather, generated_at }
+
     // --- Step 3: Build Claude content blocks ---
     const imageBlocks = imageBase64Array.flatMap((base64: string, i: number) => {
       const label = photoLabels[i] ?? `Photo ${i + 1} of ${imageBase64Array.length}`;
@@ -223,10 +299,6 @@ Batting depth:
 Total squad size: ${squad.seamers + squad.fastAllRounders + squad.spinners + squad.spinAllRounders + squad.batters}` : '';
 
     const teamJsonSection = squad ? `"team": {
-    "toss_decision": "bat or bowl",
-    "confidence": "high / medium / low",
-    "confidence_pct": integer between 50 and 95 — percentage certainty of toss_decision (low: 50–65, medium: 66–74, high: 75–95, never outside this range),
-    "reasoning": "squad-aware toss reasoning — reference specific numbers e.g. With ${squad.seamers + squad.fastAllRounders} pace options on a damp surface",
     "squad_analysis": {
       "summary": "overall assessment of this squad's fit for the pitch and conditions in 1-2 sentences",
       "toss_advantage": "specific reason why squad composition suits the recommended toss decision",
@@ -239,6 +311,10 @@ Total squad size: ${squad.seamers + squad.fastAllRounders + squad.spinners + squ
         "tip for top order — specific to conditions"
       ]
     },
+    "reasoning": "squad-aware toss reasoning referencing Phase 1 pitch signals and squad numbers, in plain conversational English — 2-3 sentences, no phase labels or trigger names. End with 'Therefore: [bat/bowl].'",
+    "toss_decision": "bat or bowl",
+    "confidence": "high / medium / low",
+    "confidence_pct": integer between 50 and 95 — percentage certainty of toss_decision (low: 50–65, medium: 66–74, high: 75–95, never outside this range),
     "par_score": { "low": integer for ${overs} overs, "high": integer for ${overs} overs },
     "rain_impact": ${teamRainImpactTemplate}
   }` : `"team": null`;
@@ -268,12 +344,33 @@ CRITICAL INSTRUCTION:
 The PHOTOS are your PRIMARY source of truth. What you can physically see in the images must drive your assessment. Do not invent or assume surface characteristics that are not visible in the photos.
 
 Weather data is SECONDARY CONTEXT only — it tells you how the existing surface will behave, not what the surface looks like. For example:
-- If photos show a DRY DUSTY pitch but weather is wet → the pitch is dry and dusty, but rain may have added some surface moisture not yet visible
-- If photos show GREEN GRASSY pitch and weather is dry → seam movement likely early but pitch may play better than expected
-- If photos show CRACKED DRY pitch and weather is cold/damp → cracks suggest spin later, damp air may help swing early
+- If photos show a DRY DUSTY pitch but weather is wet → pitch is dry and dusty (describe it as such). Rain adds humidity/swing context but does NOT change the pitch read to "green" or "damp"
+- If photos show GREEN GRASSY pitch and weather is dry → seam movement early is STILL the correct read. Dry weather adjusts confidence slightly downward; it does NOT reverse the bowl-first call
+- If photos show CRACKED DRY pitch and weather is cold/damp → cracks suggest spin later, damp air may help swing early. Still bat first on a dry cracked surface
 - Never describe the pitch as "green" or "grassy" if the photos show brown/dry surface
 - Never describe "damp sheen" or "moisture" if photos show a dry dusty surface
 - Always describe what you ACTUALLY SEE first, then adjust for weather second
+
+BOWL-FIRST TRIGGERS — these pitch signals should produce a "bowl" recommendation:
+1. GREEN GRASS COVERAGE: Photos show ≥40% green, upright grass — especially in good-length zones → BOWL. New ball will move laterally and off the pitch
+2. MOISTURE SHEEN: Visible wet sheen, dark damp patches, or soft surface appearance → BOWL. Ball will seam and swing
+3. GREEN + OVERCAST + RECENT RAIN: Green surface combined with overcast skies and rain in last 48h → BOWL (high confidence). Classic UK bowling conditions
+4. PRE-EXISTING WEAR AT BOTH ENDS: Heavily crumbled, bare patches from previous matches at good-length zones of BOTH ends → BOWL. Variable bounce from ball one; batting is hardest early on a worn surface
+
+BAT-FIRST TRIGGERS — these pitch signals should produce a "bat" recommendation:
+1. DRY/BROWN/GRASSLESS: Predominantly brown, bare, hard surface with little green grass → BAT. Surface plays truest early and deteriorates later
+2. FIRM AND ROLLED: Looks hard, consistent, well-prepared with even covering of short dry grass → BAT
+3. CRACKED AND DRY: Visible cracks, no moisture, brown/yellow dominant — spin becomes dangerous later → BAT first to score while pitch is true
+4. PATCHY WITH WEAR ON ONE END ONLY: Single-end wear is not enough to justify bowling first; surface still plays reasonably true → BAT
+
+CONTRASTIVE CALIBRATION EXAMPLES (use these to calibrate your decision):
+- "Lush even green coverage across full length, upright grass, fresh preparation, no cracks" → BOWL (high confidence ~80%)
+- "90% green coverage, overcast sky visible, surface appears soft, 20mm rain last 48h" → BOWL (high confidence ~85%)
+- "Green-brown mixed with moisture sheen visible in close-up, surface looks soft underfoot" → BOWL (medium confidence ~70%)
+- "Brown, dry, sparse dying grass, hard-looking compacted surface, 0mm rain 7 days" → BAT (high confidence ~78%)
+- "Cracked dry surface, yellow/brown, patchy sparse grass, baked appearance" → BAT (high confidence ~82%)
+
+NO PITCH VISIBLE: If you cannot identify a cricket pitch in the photos, set toss_decision to "bat", confidence_pct to 50, and state clearly in internal_reasoning that no valid pitch assessment is possible. Do NOT substitute weather data as pitch evidence and do not apply a weather-based default.
 
 Ground: ${groundName}, UK club cricket
 Match format: ${overs} overs per side
@@ -296,15 +393,42 @@ Today's match forecast (10am–7pm local):
 ${dlsContext}
 ${squadSection}
 
-WHAT TO ASSESS FROM PHOTOS (be specific about what you see):
-1. Grass coverage — thick/patchy/bare/none
-2. Surface colour — green/brown/yellow/mixed
-3. Visible cracks — none/hairline/significant/wide open
-4. Moisture signs — sheen/dark patches/dry/dusty
-5. Wear patterns — fresh/some wear/heavily worn/crumbling
-6. Surface hardness — looks hard/medium/soft based on preparation
+## MANDATORY TOSS DECISION PROCESS — follow this order strictly, do not skip steps
 
-Then combine what you see with the weather context to predict behaviour.
+PHASE 1 — VISUAL EXTRACTION (output these in pitch_signals before anything else):
+Read the photos and extract each of these signals explicitly:
+- grass_coverage_pct: estimate 0–100 (0 = bare soil, 100 = fully lush green)
+- surface_colour: green / yellow-green / brown / mixed (describe exactly what you see)
+- visible_cracks: none / hairline / significant / wide open
+- moisture_signs: sheen / dark patches / dry / dusty / none
+- wear_patterns: fresh / some wear / heavily worn / crumbling
+- surface_hardness: hard / medium / soft (based on preparation and visual appearance)
+- footmarks: none / light / significant (pre-existing wear at good-length zones from previous matches)
+
+PHASE 2 — APPLY TRIGGERS (do this BEFORE writing toss_decision):
+Match your Phase 1 observations against the BOWL-FIRST TRIGGERS and BAT-FIRST TRIGGERS above.
+Write internal_reasoning first using TERSE BULLET FORMAT — no prose paragraphs. Use this exact structure:
+• P1: [all 7 pitch_signal values as short labels, e.g. "grass 35%, brown/yellow, hairline cracks, dry, one-end worn, hard, light footmarks"]
+• BOWL#1 (≥40% green): MATCH/NO — [3-5 word reason]
+• BOWL#2 (moisture sheen): MATCH/NO — [3-5 word reason]
+• BOWL#3 (green+overcast+rain): MATCH/NO — [3-5 word reason]
+• BOWL#4 (both-ends wear): MATCH/NO — [3-5 word reason]
+• BAT#1 (dry/brown/grassless): MATCH/NO — [3-5 word reason]
+• BAT#2 (firm/rolled): MATCH/NO — [3-5 word reason]
+• BAT#3 (cracked/dry): MATCH/NO — [3-5 word reason]
+• BAT#4 (single-end wear only): MATCH/NO — [3-5 word reason]
+• P3: [weather effect in ≤8 words] → confidence [+N/−N%/unchanged]
+• Therefore: [bat/bowl].
+End internal_reasoning with "Therefore: [bat/bowl]." Only then set toss_decision to match that conclusion.
+Then write toss_reasoning_summary: 2-3 sentences plain English for the captain, no phase labels, no trigger names.
+
+PHASE 3 — WEATHER ADJUSTMENT:
+Weather adjusts CONFIDENCE ONLY — it does not flip the bat/bowl decision.
+- Green pitch + heavy rain → bowl, confidence_pct +5 to +10
+- Green pitch + dry sunny → bowl, confidence_pct −5 (still bowl)
+- Dry pitch + overcast → bat, confidence_pct −5 (still bat, modest swing possible)
+- Rain probability > 50% → DLS adjustment as per rain_impact field; may push toward bowl if pitch is borderline
+- Weather NEVER converts a clear bat pitch to bowl or vice versa.
 
 ## Required Output
 
@@ -312,19 +436,29 @@ Return ONLY a JSON object with this exact top-level structure — no markdown, n
 
 {
   "general": {
-    "toss_decision": "bat or bowl",
-    "confidence": "high / medium / low",
-    "confidence_pct": integer between 50 and 95 — percentage certainty of toss_decision (low: 50–65, medium: 66–74, high: 75–95, never outside this range),
+    "pitch_signals": {
+      "grass_coverage_pct": "estimated 0-100",
+      "surface_colour": "green / yellow-green / brown / mixed",
+      "visible_cracks": "none / hairline / significant / wide open",
+      "moisture_signs": "sheen / dark patches / dry / dusty / none",
+      "wear_patterns": "fresh / some wear / heavily worn / crumbling",
+      "surface_hardness": "hard / medium / soft",
+      "footmarks": "none / light / significant"
+    },
     "pitch_type": "describe what you ACTUALLY SEE in 3-4 words",
     "behaviour": "one sentence based primarily on visible surface",
-    "par_score_min": integer for ${overs} overs,
-    "par_score_max": integer for ${overs} overs,
-    "toss_reasoning": "explain using BOTH what you see AND weather — do NOT mention squad at all",
-    "selection_tip": "one generic sentence on team selection based on pitch only",
-    "weather_impact": "one sentence on how weather ADJUSTS the read — not replaces it",
     "key_signals": ["list ONLY things you can actually see in the photos — 3-5 items"],
     "first_10_overs": "one sentence based on visible surface + weather",
     "last_10_overs": "one sentence on expected deterioration",
+    "internal_reasoning": "terse bullet list: • P1 signal values • each trigger MATCH/NO + 3-5 word reason • P3 weather effect • 'Therefore: bat/bowl.' No prose paragraphs.",
+    "toss_decision": "bat or bowl",
+    "toss_reasoning_summary": "2-3 sentences, plain English, captain-facing. No phase labels, no trigger names, no jargon. Key visual facts + conclusion as if talking to a teammate.",
+    "confidence": "high / medium / low",
+    "confidence_pct": integer between 50 and 95 — percentage certainty of toss_decision (low: 50–65, medium: 66–74, high: 75–95, never outside this range),
+    "par_score_min": integer for ${overs} overs,
+    "par_score_max": integer for ${overs} overs,
+    "selection_tip": "one generic sentence on team selection based on pitch only",
+    "weather_impact": "one sentence on how weather ADJUSTS confidence — not the decision itself",
     "squad_rating": null,
     "squad_verdict": null,
     "squad_strengths": [],
@@ -343,29 +477,41 @@ RAIN IMPACT RULES (apply to BOTH general.rain_impact and team.rain_impact):
 - If rain_probability_percent is 25–50: set affects_toss: true, mention DLS as secondary factor, keep recommendation measured
 - If rain_probability_percent > 50: set affects_toss: true, strong recommendation to bowl first, DLS advantage is a primary factor`;
 
-    // --- Step 4: Call Claude ---
+    // --- Step 4: Call Claude (with retry on 500/503/529) ---
     console.log(`[${requestId}] Calling Claude with ${imageBase64Array.length} images`);
+    const claudeRetryLog: Array<{ status: number; msg: string }> = [];
     let claudeData: any;
     try {
-      const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": Deno.env.get("ANTHROPIC_API_KEY")!,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
+      const { data, attempts } = await callClaudeWithRetry(
+        Deno.env.get("ANTHROPIC_API_KEY")!,
+        JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 1500,
+          max_tokens: squad ? 2100 : 1600,
           system: systemPrompt,
           messages: [{ role: "user", content: imageBlocks }],
         }),
-      });
-      claudeData = await claudeRes.json();
-      console.log(`[${requestId}] Claude HTTP status: ${claudeRes.status}, stop_reason: ${claudeData?.stop_reason}, error: ${claudeData?.error?.message ?? "none"}`);
-      if (!claudeRes.ok) throw new Error(`Claude API error ${claudeRes.status}: ${claudeData?.error?.message}`);
+        claudeRetryLog,
+      );
+      claudeData = data;
+      console.log(`[${requestId}] Claude OK — attempts: ${attempts}, stop_reason: ${claudeData?.stop_reason}, error: ${claudeData?.error?.message ?? "none"}`);
+      if (attempts > 1) {
+        console.warn(`[${requestId}] Claude needed ${attempts} attempts — retries: ${JSON.stringify(claudeRetryLog)}`);
+        logClaudeError({
+          requestId, supabaseUrl: Deno.env.get("SUPABASE_URL")!, supabaseKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+          userId: userId ?? null, groundName, statusCode: claudeRetryLog[0].status, attemptCount: attempts,
+          errorMessage: `Succeeded after retry — ${claudeRetryLog.map(r => r.msg).join("; ")}`,
+        });
+      }
     } catch (e) {
       console.error(`[${requestId}] FAIL Claude call:`, (e as Error).message);
+      const statusFromMsg = parseInt(/HTTP (\d+):/.exec((e as Error).message)?.[1] ?? "0");
+      logClaudeError({
+        requestId, supabaseUrl: Deno.env.get("SUPABASE_URL")!, supabaseKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+        userId: userId ?? null, groundName,
+        statusCode: claudeRetryLog.length > 0 ? claudeRetryLog.slice(-1)[0].status : statusFromMsg,
+        attemptCount: claudeRetryLog.length || 1,
+        errorMessage: (e as Error).message,
+      });
       throw e;
     }
 
@@ -406,6 +552,8 @@ RAIN IMPACT RULES (apply to BOTH general.rain_impact and team.rain_impact):
       id: reportId,
       ground_name: groundName,
       weather,
+      weather_snapshot,
+      generated_at,
       prediction: general,
       team_prediction: team,
       overs,
@@ -414,7 +562,8 @@ RAIN IMPACT RULES (apply to BOTH general.rain_impact and team.rain_impact):
     };
 
     // Fire-and-forget: save runs in background after response is returned
-    fetch(`${supabaseUrl}/rest/v1/reports`, {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(fetch(`${supabaseUrl}/rest/v1/reports`, {
       method: "POST",
       headers: {
         "apikey": supabaseKey,
@@ -441,11 +590,82 @@ RAIN IMPACT RULES (apply to BOTH general.rain_impact and team.rain_impact):
         }).then(r => console.log(`[${requestId}] Supabase retry HTTP: ${r.status}`));
       }
       console.log(`[${requestId}] Supabase save HTTP: ${dbRes.status}`);
-    }).catch(e => console.error(`[${requestId}] WARN Supabase save error (non-fatal):`, e.message));
+    }).catch(e => console.error(`[${requestId}] WARN Supabase save error (non-fatal):`, e.message)));
+
+    // Fire-and-forget: upload compressed images to Supabase Storage and patch report with
+    // signed URLs. Runs after response is returned so it never adds latency.
+    // Storage requires the legacy JWT service key — auto-injected SUPABASE_SERVICE_ROLE_KEY
+    // on new projects is the sb_secret_... format which Storage rejects with "Invalid Compact JWS".
+    const storageKey = Deno.env.get("STORAGE_SERVICE_KEY") ?? supabaseKey;
+    // @ts-ignore
+    EdgeRuntime.waitUntil((async () => {
+      try {
+        const storageBase = `${supabaseUrl}/storage/v1`;
+        const photoUrls = await Promise.all(imageBase64Array.map(async (base64, i) => {
+          const path = `${userId ?? 'anon'}/${reportId}/${i}.jpg`;
+          const binary = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+
+          const uploadRes = await fetch(`${storageBase}/object/pitch-photos/${path}`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${storageKey}`,
+              'Content-Type': 'image/jpeg',
+              'x-upsert': 'true',
+            },
+            body: binary,
+          });
+          if (!uploadRes.ok) {
+            const detail = await uploadRes.text();
+            throw new Error(`Upload ${i} HTTP ${uploadRes.status}: ${detail.slice(0, 120)}`);
+          }
+
+          const signRes = await fetch(`${storageBase}/object/sign/pitch-photos/${path}`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${storageKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ expiresIn: 315360000 }), // ~10 years
+          });
+          if (!signRes.ok) {
+            const detail = await signRes.text();
+            throw new Error(`Sign ${i} HTTP ${signRes.status}: ${detail.slice(0, 120)}`);
+          }
+          const signData = await signRes.json();
+          // signedURL may be relative ("/object/sign/...") or absolute
+          const signed: string = signData.signedURL ?? signData.signedUrl ?? '';
+          return signed.startsWith('http') ? signed : `${storageBase}${signed}`;
+        }));
+
+        const patchRes = await fetch(`${supabaseUrl}/rest/v1/reports?id=eq.${reportId}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal',
+          },
+          body: JSON.stringify({ photo_urls: photoUrls }),
+        });
+        if (!patchRes.ok) {
+          const detail = await patchRes.text();
+          throw new Error(`Patch photo_urls HTTP ${patchRes.status}: ${detail.slice(0, 120)}`);
+        }
+        console.log(`[${requestId}] Photo upload+patch HTTP: ${patchRes.status}`);
+      } catch (e) {
+        const errMsg = (e as Error).message;
+        console.error(`[${requestId}] WARN photo upload failed (non-fatal):`, errMsg);
+        fetch(`${supabaseUrl}/rest/v1/analysis_errors`, {
+          method: 'POST',
+          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ ground_name: `PHOTO_ERR:${groundName ?? 'unknown'}`, status_code: 0, attempt_count: 1, error_message: errMsg }),
+        }).catch(() => {});
+      }
+    })());
 
     console.log(`[${requestId}] Success — returning response immediately`);
     return new Response(
-      JSON.stringify({ general, team, weather, reportId }),
+      JSON.stringify({ general, team, weather, weather_snapshot, generated_at, reportId }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 

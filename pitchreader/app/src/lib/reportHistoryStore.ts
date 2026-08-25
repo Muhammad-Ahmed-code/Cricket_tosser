@@ -3,6 +3,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 const KEY = '@pitchreader/report_history'
 const MAX_REPORTS = 50
 
+export interface SquadComposition {
+  seamers: number
+  fastAllRounders: number
+  spinners: number
+  spinAllRounders: number
+  batters: number
+}
+
 export interface LocalReportEntry {
   id: string
   ground_name: string
@@ -11,10 +19,15 @@ export interface LocalReportEntry {
   created_at: string
   prediction: Record<string, unknown>
   weather: Record<string, unknown>
+  weather_snapshot?: Record<string, unknown> | null
+  generated_at?: string | null
+  team_prediction?: Record<string, unknown> | null
+  squad?: SquadComposition | null
   notification_id?: string | null
   match_notification_id?: string | null
   toss_completed?: boolean
   match_completed?: boolean
+  photo_urls?: string[] | null
 }
 
 export const reportHistoryStore = {
