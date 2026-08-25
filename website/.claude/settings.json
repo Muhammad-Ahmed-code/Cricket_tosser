@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(unzip \"Design a marketing website for Cricket Tosser — an AI-powered cricket pitch anal.zip\" -d design_extracted/)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --no-src-dir --import-alias \"@/*\" --no-turbopack)",
+      "Bash(npx create-next-app@latest site --typescript --tailwind --eslint --app --no-src-dir --import-alias \"@/*\" --no-turbopack)",
+      "Bash(cp /Users/mughal/Documents/GitHub/Cricket_tosser/website/design_extracted/design_handoff_marketing_site/assets/coin-icon.png /Users/mughal/Documents/GitHub/Cricket_tosser/website/site/public/coin-icon.png)",
+      "Bash(curl -s http://localhost:3099)",
+      "Bash(mkdir -p /Users/mughal/Documents/GitHub/Cricket_tosser/website/site/app/privacy)",
+      "Bash(mkdir -p /Users/mughal/Documents/GitHub/Cricket_tosser/website/site/app/privacy-policy)"
+    ],
+    "additionalDirectories": [
+      "/Users/mughal/Documents/GitHub/Cricket_tosser/website/design_extracted/design_handoff_marketing_site/assets",
+      "/Users/mughal/Documents/GitHub/Cricket_tosser/website/site/app"
+    ]
+  }
+}
